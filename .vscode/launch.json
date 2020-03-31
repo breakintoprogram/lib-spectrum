@@ -1,0 +1,32 @@
+{
+	// Use IntelliSense to learn about possible attributes.
+	// Hover to view descriptions of existing attributes.
+	// For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Z80 Debugger",
+			"type": "z80-debug",
+			"request": "launch",
+			"zhostname": "localhost",
+			"zport": 10000,
+			"topOfStack": "Stack_Top",
+			"rootFolder": "${fileDirname}",
+			"listFiles": [
+				{
+					"path": "${fileDirname}/${fileBasenameNoExtension}.lst",
+					"useFiles": true,
+					"asm": "sjasmplus",
+					"mainFile": "${fileDirname}/${fileBasenameNoExtension}.z80"
+				}
+			],
+			"disassemblerArgs": {
+				"esxdosRst": true
+			},
+			"load": "${fileDirname}/${fileBasenameNoExtension}.sna",
+			"skipInterrupt": false,
+			"startAutomatically": false,
+			"preLaunchTask": "sjasmplus"
+		}
+	]
+}
