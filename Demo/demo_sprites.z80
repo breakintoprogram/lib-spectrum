@@ -1,0 +1,193 @@
+;
+; Title:        Sprite Demo
+; Author:       Dean Belfield
+; Created:	20/08/2011
+; Last updated: 20/08/2011
+;
+; Requires:	keyboard, output, screen_buffer, sound, sprite, math
+;
+; Modinfo:
+;
+
+			DEVICE ZXSPECTRUM48			; sjasmplus directive for SAVESNA at end
+
+Stack_Top:		EQU 0xFFF0
+Code_Start:		EQU 0x8000
+
+			ORG Code_Start
+
+			JP MAIN					; JP past the included code to MAIN
+
+			include "../lib/keyboard.z80"
+			include "../lib/output.z80"
+			include "../lib/screen_buffer.z80"
+			include "../lib/sound.z80"
+			include "../lib/sprite.z80"
+			include "../lib/math.z80"
+
+MAIN:			DI
+			LD SP, Stack_Top
+			LD A,38h
+			CALL Clear_Screen
+			LD IX,Text_Scores
+			CALL Print_String
+			CALL Initialise_Sprites
+			LD HL,Interrupt
+			LD IX,0xFFF0
+			LD (IX+04h),0xC3            ; Opcode for JP
+			LD (IX+05h),L
+			LD (IX+06h),H
+			LD (IX+0Fh),0x18            ; Opcode for JR; this will do JR to FFF4h
+			LD A,0x39
+			LD I,A
+			IM 2
+			EI
+
+LOOP:			HALT
+			CALL Read_Keyboard
+			JR LOOP
+
+Initialise_Sprites:	LD IX,Sprite_Data
+			LD B,Sprite_Max
+Initialise_Sprites_1:	CALL Rand16
+			LD A,H
+			AND 0x7F
+			ADD A,16
+			LD (IX+Sprite_X),L
+			LD (IX+Sprite_X_Old),L
+			LD (IX+Sprite_Y),A
+			LD (IX+Sprite_Y_Old),A
+			LD HL,Demo_Sprite_Logic
+			LD (IX+Sprite_Logic),L
+			LD (IX+Sprite_Logic+1),H
+			LD DE,Sprite_Data_Block_Size
+			ADD IX,DE
+			DJNZ Initialise_Sprites_1
+			RET
+
+Demo_Sprite_Logic:	LD A,(IX+Sprite_X)
+			INC A
+			CP 240
+			JR C,Demo_Sprite_Logic_1
+			LD A,0
+Demo_Sprite_Logic_1	LD (IX+Sprite_X),A
+			LD A,(IX+Sprite_Y)
+			INC A
+			CP 176
+			JR C,Demo_Sprite_Logic_2
+			LD A,16
+Demo_Sprite_Logic_2	LD (IX+Sprite_Y),A
+			RET 
+
+Interrupt:		DI
+			PUSH AF
+			PUSH BC
+			PUSH DE
+			PUSH HL
+			PUSH IX
+			EXX
+			EX AF,AF'
+			PUSH AF
+			PUSH BC
+			PUSH DE
+			PUSH HL
+			PUSH IY
+			LD A,2
+			OUT (254),A
+			LD HL,Sprite_Bubble
+			CALL Render_Sprites
+			CALL Handle_Sprites
+			LD A,7
+			OUT (254),A
+			POP IY
+			POP HL
+			POP DE
+			POP BC
+			POP AF
+			EXX
+			EX AF,AF'
+			POP IX
+			POP HL
+			POP DE
+			POP BC
+			POP AF
+			EI
+			RET
+
+Text_Scores:		DB 0,0,"Demo",0xFE
+			DB 9,0,"Score 00000000",0xFE
+			DB 24,0,"Lives 0",0xFF
+
+Sprite_Bubble:		DW Sprite_Bubble_0,Sprite_Bubble_0,Sprite_Bubble_2,Sprite_Bubble_2,Sprite_Bubble_4,Sprite_Bubble_4,Sprite_Bubble_6,Sprite_Bubble_6
+
+Sprite_Bubble_0:	DB %00000000,%00000000,%00000000
+			DB %00000011,%11000000,%00000000
+			DB %00001100,%00110000,%00000000
+			DB %00010000,%00001000,%00000000
+			DB %00100110,%00000100,%00000000
+			DB %00101000,%00000100,%00000000
+			DB %01001000,%00000010,%00000000
+			DB %01000000,%00000010,%00000000
+			DB %01000000,%00000010,%00000000
+			DB %01000000,%00000010,%00000000
+			DB %00100000,%00000100,%00000000
+			DB %00100000,%00000100,%00000000
+			DB %00010000,%00001000,%00000000
+			DB %00001100,%00110000,%00000000
+			DB %00000011,%11000000,%00000000
+			DB %00000000,%00000000,%00000000
+
+Sprite_Bubble_2:	DB %00000000,%00000000,%00000000
+			DB %00000000,%11110000,%00000000
+			DB %00000011,%00001100,%00000000
+			DB %00000100,%00000010,%00000000
+			DB %00001001,%10000001,%00000000
+			DB %00001010,%00000001,%00000000
+			DB %00010010,%00000000,%10000000
+			DB %00010000,%00000000,%10000000
+			DB %00010000,%00000000,%10000000
+			DB %00010000,%00000000,%10000000
+			DB %00001000,%00000001,%00000000
+			DB %00001000,%00000001,%00000000
+			DB %00000100,%00000010,%00000000
+			DB %00000011,%00001100,%00000000
+			DB %00000000,%11110000,%00000000
+			DB %00000000,%00000000,%00000000
+
+Sprite_Bubble_4:	DB %00000000,%00000000,%00000000
+			DB %00000000,%00111100,%00000000
+			DB %00000000,%11000011,%00000000
+			DB %00000001,%00000000,%10000000
+			DB %00000010,%01100000,%01000000
+			DB %00000010,%10000000,%01000000
+			DB %00000100,%10000000,%00100000
+			DB %00000100,%00000000,%00100000
+			DB %00000100,%00000000,%00100000
+			DB %00000100,%00000000,%00100000
+			DB %00000010,%00000000,%01000000
+			DB %00000010,%00000000,%01000000
+			DB %00000001,%00000000,%10000000
+			DB %00000000,%11000011,%00000000
+			DB %00000000,%00111100,%00000000
+			DB %00000000,%00000000,%00000000
+
+Sprite_Bubble_6:	DB %00000000,%00000000,%00000000
+			DB %00000000,%00001111,%00000000
+			DB %00000000,%00110000,%11000000
+			DB %00000000,%01000000,%00100000
+			DB %00000000,%10011000,%00010000
+			DB %00000000,%10100000,%00010000
+			DB %00000001,%00100000,%00001000
+			DB %00000001,%00000000,%00001000
+			DB %00000001,%00000000,%00001000
+			DB %00000001,%00000000,%00001000
+			DB %00000000,%10000000,%00010000
+			DB %00000000,%10000000,%00010000
+			DB %00000000,%01000000,%00100000
+			DB %00000000,%00110000,%11000000
+			DB %00000000,%00001111,%00000000
+			DB %00000000,%00000000,%00000000
+
+Code_Length:		EQU $-Code_Start+1
+
+			SAVESNA "Demo/demo_sprites.sna", Code_Start

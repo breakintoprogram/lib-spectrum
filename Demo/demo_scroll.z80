@@ -1,0 +1,366 @@
+;
+; Title:        Scroll Demo
+; Author:       Dean Belfield
+; Created:	27/01/2020
+; Last updated: 03/02/2020
+;
+; Requires:	keyboard, sprite_masked, scroll
+;
+; Modinfo:
+;
+; 03/02/2020:	Tileset information now stored in map data
+;
+			DEVICE ZXSPECTRUM48			; sjasmplus directive for SAVESNA at end
+
+Stack_Top:		EQU 0xFFF0
+Code_Start:		EQU 0x8000
+
+			ORG Code_Start
+
+			JP MAIN					; JP past the included code to MAIN
+
+			include "../lib/macros.z80"
+			include "../lib/keyboard.z80"
+			include "../lib/sprite_masked.z80"
+			include "../lib/output.z80"
+			include "../lib/scroll.z80"
+			include "../lib/math.z80"
+
+; MAIN
+; - Initialise some stuff
+; - Set up the interrupt routines
+; NB:
+; For details on how this interrupt routine works, read 
+; http://www.breakintoprogram.co.uk/computers/zx-spectrum/interrupts
+; Will only work on the 48K Spectrum!
+;
+MAIN:			DI					; Disable interrupts
+			LD SP, Stack_Top
+			LD A,0x00
+			OUT 254,A
+			LD A,0x47	
+			CALL Clear_Screen			; Clear the screen
+			CALL Initialise_Sprites			; Initialise the sprites
+			LD HL, 16 * (Demo_Map_Length - 16)
+			LD (Vertical_Scroll_Offset), HL
+			LD HL,Interrupt
+			LD IX,0xFFF0				; This code is to be written at 0xFF
+			LD (IX+04h),0xC3			; Opcode for JP
+			LD (IX+05h),L				; Store the address of the interrupt routine in
+			LD (IX+06h),H
+			LD (IX+0Fh),0x18			; Opcode for JR; this will do JR to FFF4h
+			LD A,0x39	        		; Interrupt table at page 0x3900 (ROM)
+			LD I,A					; Set the interrupt register to that page
+			IM 2					; Set the interrupt mode
+			EI					; Enable interrupts
+
+LOOP:			HALT					; Just loop round doing nothing now
+			JR LOOP					; All the work is done in the Interrupt routine
+
+; The Interrupt routine
+; NB:
+; The interrupts are disabled to ensure that this interrupt cannot be interrupted.
+;
+Interrupt:		DI					; Disable interrupts 
+			PUSH AF					; Save all the registers on the stack
+			PUSH BC					; This is probably not necessary unless
+			PUSH DE					; we're looking at returning cleanly
+			PUSH HL					; back to BASIC at some point
+			PUSH IX
+			EXX
+			EX AF,AF'
+			PUSH AF
+			PUSH BC
+			PUSH DE
+			PUSH HL
+			PUSH IY
+
+;			LD A,1					; Change the border colour
+;			OUT (254),A				; Used for timing routines visually
+			LD HL, Demo_Map				; Initialise the scroll
+			CALL Initialise_Scroll			; This creates all the self-modding code
+;			LD A,0					; code in here like a music driver
+;			OUT (254),A
+			CALL Scroll				; Render the scroll to the screen
+			CALL Render_Sprites			; And render the sprites
+			CALL Move_Scroll			; Move the scroll
+			CALL Handle_Sprites			; Move the sprites
+;			LD A,0
+;			OUT (254),A
+
+			POP IY					; Restore all the registers
+			POP HL
+			POP DE
+			POP BC
+			POP AF
+			EXX
+			EX AF,AF'
+			POP IX
+			POP HL
+			POP DE
+			POP BC
+			POP AF
+			EI					; Enable interrupts
+			RET					; And return
+
+; A simple delay loop
+;
+Delay:			DEC BC
+			LD A,B
+			OR C
+			JR NZ, Delay
+			RET
+
+; Move the scroll offset
+;
+Move_Scroll:		LD HL, (Vertical_Scroll_Offset)
+Move_Scroll_Speed:	LD BC, 2
+			AND A
+			SBC HL, BC
+			JR NC, Move_Scroll_1			; Boundary check
+			LD BC, 16 * (Demo_Map_Length - 16) 	; If we've reached the top, then
+			ADD HL, BC				; wrap back to the bottom
+Move_Scroll_1:		LD (Vertical_Scroll_Offset), HL
+			RET
+
+; Initialise the sprites
+;
+Initialise_Sprites:	LD IX,Sprite_Data			; Where the sprite data is stored
+			LD B,12					; Number of sprites to initialise
+			LD C,0					; Sprite Y coordinate
+Initialise_Sprites_1:	CALL Rand16				; Get a random X coordinate
+			RES 7, L
+			LD (IX+Sprite_X), L			; And store in Sprite_X
+			LD (IX+Sprite_Y), C			; Store the Y coordinate
+			LD A,C					; And increment by 13 for next sprite
+			ADD A,16
+			LD C,A
+			LD HL,Demo_Sprite_Logic			; Set the address of the sprite movement logic
+			LD (IX+Sprite_Logic),L
+			LD (IX+Sprite_Logic+1),H
+			LD HL,Sprite_Bubble			; Set the address of the sprite graphic data
+			LD (IX+Sprite_Image),L
+			LD (IX+Sprite_Image+1),H
+			LD A,B					; Set an X velocity
+			AND %00000011
+			ADD A,1
+			LD (IX+Sprite_Data_1), A		; And store this in Sprite_Data_1
+			LD DE,Sprite_Data_Block_Size		; Increment IX to point to the next
+			ADD IX,DE				; block of sprite data
+			DJNZ Initialise_Sprites_1		; And repeat
+			RET
+
+; The demo sprite logic
+;
+Demo_Sprite_Logic:	LD A,(IX+Sprite_X)			; Move the sprite by
+			ADD A,(IX+Sprite_Data_1)		; adding its velocity to its X coordinate
+			LD (IX+Sprite_X),A
+			RET C					; C set if we're still on screen
+			CP 176					; CP with 176 (right pixel boundary - sprite width)
+			RET C					; C set if we're still on screen
+			LD A,(IX+Sprite_Data_1)			; Otherwise, negate the velocity
+			NEG
+			LD (IX+Sprite_Data_1),A
+			ADD A,(IX+Sprite_X)			; And move the sprite back on screen
+			LD (IX+Sprite_X),A		
+			RET
+
+; Demo Map
+; Each map row contains 16 byts
+; - Word      : Tileset address for this row
+; - Word      : Currently unused, could be used for flags - helpful padding to make each row a convenient length
+; - Byte x 12 : A tile number for each column (see below)
+; NB:
+; Ideally this would be pre-processed from some more compressed map data. It is essentially
+; a lookup table that can be quickly converted to PUSH instructions with minimal maths - 
+; only use the high nibble so I don't have to shift left 4 times. The bottom nibble may be used
+; for flags or colour information - it is masked out by the scroll routine.
+;
+; Each PUSH instruction corresponds to a tile that can be stored on a given line
+; Push BC = 00 - This is the blank tile
+; Push DE = 10
+; Push HL = 20
+; Push AF = 30
+; Push IX = 40
+; Push IY = 50
+;
+MAP_ROW:		MACRO tileset,C01,C02,C03,C04,C05,C06,C07,C08,C09,C10,C11,C12
+			DW tileset, 0x0000
+			DB C12<<4,C11<<4,C10<<4,C09<<4,C08<<4,C07<<4
+			DB C06<<4,C05<<4,C04<<4,C03<<4,C02<<4,C01<<4
+			ENDM
+
+Demo_Map:		MAP_ROW Tileset_00, 0,0,0,0,0,0,0,0,0,0,0,0
+			MAP_ROW Tileset_00, 0,1,1,1,1,1,1,1,1,1,1,0
+			MAP_ROW Tileset_00, 0,1,1,1,1,1,1,1,1,1,1,0
+			MAP_ROW Tileset_00, 0,1,1,0,0,0,0,0,0,0,0,0
+			MAP_ROW Tileset_00, 0,1,1,0,0,0,0,0,0,0,0,0
+			MAP_ROW Tileset_00, 0,1,1,1,1,1,1,1,1,0,0,0
+			MAP_ROW Tileset_00, 0,1,1,1,1,1,1,1,1,1,0,0
+			MAP_ROW Tileset_00, 0,0,0,0,0,0,0,0,1,1,0,0
+			MAP_ROW Tileset_00, 0,0,0,0,0,0,0,0,0,1,1,0
+			MAP_ROW Tileset_00, 0,0,0,0,0,0,0,0,0,1,1,0
+			MAP_ROW Tileset_00, 0,0,0,0,0,0,0,0,0,1,1,0
+			MAP_ROW Tileset_00, 0,0,0,0,0,0,0,0,0,1,1,0
+			MAP_ROW Tileset_00, 0,0,0,0,0,0,0,0,1,1,0,0
+			MAP_ROW Tileset_00, 0,1,1,1,1,1,1,1,1,1,0,0
+			MAP_ROW Tileset_00, 0,1,1,1,1,1,1,1,1,0,0,0
+			MAP_ROW Tileset_00, 0,0,0,0,0,0,0,0,0,0,0,0
+			MAP_ROW Tileset_00, 0,0,0,1,1,1,1,1,1,0,0,0
+			MAP_ROW Tileset_00, 0,0,1,1,1,1,1,1,1,1,0,0
+			MAP_ROW Tileset_00, 0,1,1,0,0,0,0,0,0,1,1,0
+			MAP_ROW Tileset_00, 0,1,1,0,0,0,0,0,0,1,1,0
+			MAP_ROW Tileset_00, 0,1,1,0,0,0,0,0,0,1,1,0
+			MAP_ROW Tileset_00, 0,1,1,0,0,0,0,0,0,1,1,0
+			MAP_ROW Tileset_00, 0,1,1,0,0,0,0,0,0,1,1,0
+			MAP_ROW Tileset_00, 0,1,1,0,0,0,0,0,0,1,1,0
+			MAP_ROW Tileset_00, 0,1,1,0,0,0,0,0,0,1,1,0
+			MAP_ROW Tileset_00, 0,1,1,0,0,0,0,0,0,1,1,0
+			MAP_ROW Tileset_00, 0,1,1,0,0,0,0,0,0,1,1,0
+			MAP_ROW Tileset_00, 0,1,1,0,0,0,0,0,0,1,1,0
+			MAP_ROW Tileset_00, 0,0,1,1,1,1,1,1,1,1,0,0
+			MAP_ROW Tileset_00, 0,0,0,1,1,1,1,1,1,0,0,0
+			MAP_ROW Tileset_00, 0,0,0,0,0,0,0,0,0,0,0,0
+			MAP_ROW Tileset_00, 0,0,0,1,1,1,1,1,1,0,0,0
+			MAP_ROW Tileset_00, 0,0,1,1,1,1,1,1,1,1,0,0
+			MAP_ROW Tileset_00, 0,1,1,0,0,0,0,0,0,1,1,0
+			MAP_ROW Tileset_00, 0,1,1,0,0,0,0,0,0,1,1,0
+			MAP_ROW Tileset_00, 0,1,1,0,0,0,0,0,0,1,1,0
+			MAP_ROW Tileset_00, 0,1,1,0,0,0,0,0,0,1,1,0
+			MAP_ROW Tileset_00, 0,1,1,0,0,0,0,0,0,1,1,0
+			MAP_ROW Tileset_00, 0,1,1,0,0,0,0,0,0,1,1,0
+			MAP_ROW Tileset_00, 0,1,1,0,0,0,0,0,0,1,1,0
+			MAP_ROW Tileset_00, 0,1,1,0,0,0,0,0,0,1,1,0
+			MAP_ROW Tileset_00, 0,1,1,0,0,0,0,0,0,1,1,0
+			MAP_ROW Tileset_00, 0,1,1,0,0,0,0,0,0,1,1,0
+			MAP_ROW Tileset_00, 0,0,1,1,1,1,1,1,1,1,0,0
+			MAP_ROW Tileset_00, 0,0,0,1,1,1,1,1,1,0,0,0
+			MAP_ROW Tileset_00, 0,0,0,0,0,0,0,0,0,0,0,0
+			MAP_ROW Tileset_00, 0,1,1,1,1,1,1,1,1,1,1,0
+			MAP_ROW Tileset_00, 0,1,1,1,1,1,1,1,1,1,1,0
+			MAP_ROW Tileset_00, 0,1,1,0,0,0,0,0,0,0,0,0
+			MAP_ROW Tileset_00, 0,1,1,0,0,0,0,0,0,0,0,0
+			MAP_ROW Tileset_00, 0,1,1,1,1,1,1,1,1,0,0,0
+			MAP_ROW Tileset_00, 0,1,1,1,1,1,1,1,1,1,0,0
+			MAP_ROW Tileset_00, 0,0,0,0,0,0,0,0,1,1,0,0
+			MAP_ROW Tileset_00, 0,0,0,0,0,0,0,0,0,1,1,0
+			MAP_ROW Tileset_00, 0,0,0,0,0,0,0,0,0,1,1,0
+			MAP_ROW Tileset_00, 0,0,0,0,0,0,0,0,0,1,1,0
+			MAP_ROW Tileset_00, 0,0,0,0,0,0,0,0,0,1,1,0
+			MAP_ROW Tileset_00, 0,0,0,0,0,0,0,0,1,1,0,0
+			MAP_ROW Tileset_00, 0,1,1,1,1,1,1,1,1,1,0,0
+			MAP_ROW Tileset_00, 0,1,1,1,1,1,1,1,1,0,0,0
+			MAP_ROW Tileset_00, 0,0,0,0,0,0,0,0,0,0,0,0
+
+
+Demo_Map_Length:	EQU ($ - Demo_Map + 1) / 16
+
+; This is the demo tileset
+;
+Tileset_00:		DB %00000000, %00000000, %11111111, %11111110, %11111111, %11111110, %11111111, %11111110, %11111111, %11111110, %11111111, %11111110
+			DB %00000000, %00000000, %11010101, %01010110, %10000000, %00000010, %11000000, %00000110, %10111110, %11101110, %11111111, %11111110
+			DB %00000000, %00000000, %10101010, %10101010, %10000000, %00000010, %10100000, %00001010, %10101101, %01010110, %11111111, %11111110
+			DB %00000000, %00000000, %11010101, %01010110, %10000000, %00000010, %10010000, %00010010, %10000101, %01010110, %11111111, %11111110
+			DB %00000000, %00000000, %10101010, %10101010, %10000000, %00000010, %10001000, %00100010, %11101101, %01010110, %11111111, %11111110
+			DB %00000000, %00000000, %11010101, %01010110, %10000000, %00000010, %10000100, %01000010, %11101110, %11101110, %11111111, %11111110
+			DB %00000000, %00000000, %10101010, %10101010, %10000000, %00000010, %10000010, %10000010, %11111111, %11111110, %11111111, %11111110
+			DB %00000000, %00000000, %11010101, %01010110, %10000000, %00000010, %10000001, %00000010, %11111111, %11111110, %11111111, %11111110
+			DB %00000000, %00000000, %10101010, %10101010, %10000000, %00000010, %10000010, %10000010, %11111111, %11111110, %11111111, %11111110
+			DB %00000000, %00000000, %11010101, %01010110, %10000000, %00000010, %10000100, %01000010, %11111111, %11111110, %11111111, %11111110
+			DB %00000000, %00000000, %10101010, %10101010, %10000000, %00000010, %10001000, %00100010, %11111111, %11111110, %11111111, %11111110
+			DB %00000000, %00000000, %11010101, %01010110, %10000000, %00000010, %10010000, %00010010, %11111111, %11111110, %11111111, %11111110
+			DB %00000000, %00000000, %10101010, %10101010, %10000000, %00000010, %10100000, %00001010, %11111111, %11111110, %11111111, %11111110
+			DB %00000000, %00000000, %11010101, %01010110, %10000000, %00000010, %11000000, %00000110, %11111111, %11111110, %11111111, %11111110
+			DB %00000000, %00000000, %11111111, %11111110, %11111111, %11111110, %11111111, %11111110, %11111111, %11111110, %11111111, %11111110
+			DB %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000
+
+; This is the lookup table for each pixel shift of the sprite - 8 entries
+; We only have 4 shifted definitions to save space (and my time hand-creating the sprite)
+; so each entry is repeated twice
+;
+; The first two bytes are the effective sprite width (in characters) and height (in pixels)
+;
+Sprite_Bubble:		DB 2,16: DW Sprite_Bubble_0,Sprite_Bubble_0,Sprite_Bubble_2,Sprite_Bubble_2,Sprite_Bubble_4,Sprite_Bubble_4,Sprite_Bubble_6,Sprite_Bubble_6
+
+; And the actual graphics that table points to are here - with the mask and data interleaved for
+; efficiency when drawing the sprites
+;
+; Pixel positions 0
+;
+Sprite_Bubble_0:	DB %11111111, %00000000, %11111111, %00000000, %11111111, %00000000
+			DB %11110000, %00000011, %00001111, %11000000, %11111111, %00000000
+			DB %11100000, %00001100, %00000111, %00110000, %11111111, %00000000
+			DB %11000000, %00010000, %00000011, %00001000, %11111111, %00000000
+			DB %10000000, %00100110, %00000001, %00000100, %11111111, %00000000
+			DB %10000000, %00101000, %00000001, %00000100, %11111111, %00000000
+			DB %00000000, %01001000, %00000000, %00000010, %11111111, %00000000
+			DB %00000000, %01000000, %00000000, %00000010, %11111111, %00000000
+			DB %00000000, %01000000, %00000000, %00000010, %11111111, %00000000
+			DB %00000000, %01000000, %00000000, %00000010, %11111111, %00000000
+			DB %10000000, %00100000, %00000001, %00000100, %11111111, %00000000
+			DB %10000000, %00100000, %00000001, %00000100, %11111111, %00000000
+			DB %11000000, %00010000, %00000011, %00001000, %11111111, %00000000
+			DB %11100000, %00001100, %00000111, %00110000, %11111111, %00000000
+			DB %11110000, %00000011, %00001111, %11000000, %11111111, %00000000
+			DB %11111111, %00000000, %11111111, %00000000, %11111111, %00000000
+
+; Pixel position 2 
+;
+Sprite_Bubble_2:	DB %11111111, %00000000, %11111111, %00000000, %11111111, %00000000
+			DB %11111100, %00000000, %00000011, %11110000, %11111111, %00000000
+			DB %11111000, %00000011, %00000001, %00001100, %11111111, %00000000
+			DB %11110000, %00000100, %00000000, %00000010, %11111111, %00000000
+			DB %11100000, %00001001, %00000000, %10000001, %11111111, %00000000
+			DB %11100000, %00001010, %00000000, %00000001, %01111111, %00000000
+			DB %11000000, %00010010, %00000000, %00000000, %00111111, %10000000
+			DB %11000000, %00010000, %00000000, %00000000, %00111111, %10000000
+			DB %11000000, %00010000, %00000000, %00000000, %00111111, %10000000
+			DB %11000000, %00010000, %00000000, %00000000, %00111111, %10000000
+			DB %11100000, %00001000, %00000000, %00000001, %01111111, %00000000
+			DB %11100000, %00001000, %00000000, %00000001, %11111111, %00000000
+			DB %11110000, %00000100, %00000000, %00000010, %11111111, %00000000
+			DB %11111000, %00000011, %00000001, %00001100, %11111111, %00000000
+			DB %11111100, %00000000, %00000011, %11110000, %11111111, %00000000
+			DB %11111111, %00000000, %11111111, %00000000, %11111111, %00000000
+
+; Pixel position 4 
+;
+Sprite_Bubble_4:	DB %11111111, %00000000, %11111111, %00000000, %11111111, %00000000
+			DB %11111111, %00000000, %00000000, %00111100, %11111111, %00000000
+			DB %11111110, %00000000, %00000000, %11000011, %01111111, %00000000
+			DB %11111100, %00000001, %00000000, %00000000, %00111111, %10000000
+			DB %11111000, %00000010, %00000000, %01100000, %00011111, %01000000
+			DB %11111000, %00000010, %00000000, %10000000, %00011111, %01000000
+			DB %11110000, %00000100, %00000000, %10000000, %00001111, %00100000
+			DB %11110000, %00000100, %00000000, %00000000, %00001111, %00100000
+			DB %11110000, %00000100, %00000000, %00000000, %00001111, %00100000
+			DB %11110000, %00000100, %00000000, %00000000, %00011111, %00100000
+			DB %11111000, %00000010, %00000000, %00000000, %00011111, %01000000
+			DB %11111000, %00000010, %00000000, %00000000, %00011111, %01000000
+			DB %11111100, %00000001, %00000000, %00000000, %00111111, %10000000
+			DB %11111110, %00000000, %00000000, %11000011, %01111111, %00000000
+			DB %11111111, %00000000, %00000000, %00111100, %11111111, %00000000
+			DB %11111111, %00000000, %11111111, %00000000, %11111111, %00000000
+
+; Pixel position 6
+;
+Sprite_Bubble_6:	DB %11111111, %00000000, %11111111, %00000000, %11111111, %00000000
+			DB %11111111, %00000000, %11100000, %00001111, %11111111, %00000000
+			DB %11111111, %00000000, %11000000, %00110000, %00011111, %11000000
+			DB %11111111, %00000000, %10000000, %01000000, %00001111, %00100000
+			DB %11111111, %00000000, %00000000, %10011000, %00000111, %00010000
+			DB %11111110, %00000000, %00000000, %10100000, %00000111, %00010000
+			DB %11111110, %00000001, %00000000, %00100000, %00000011, %00001000
+			DB %11111110, %00000001, %00000000, %00000000, %00000011, %00001000
+			DB %11111110, %00000001, %00000000, %00000000, %00000011, %00001000
+			DB %11111110, %00000001, %00000000, %00000000, %00000011, %00001000
+			DB %11111110, %00000000, %00000000, %10000000, %00000111, %00010000
+			DB %11111111, %00000000, %00000000, %10000000, %00000111, %00010000
+			DB %11111111, %00000000, %10000000, %01000000, %00001111, %00100000
+			DB %11111111, %00000000, %11000000, %00110000, %00011111, %11000000
+			DB %11111111, %00000000, %11100000, %00001111, %11111111, %00000000
+			DB %11111111, %00000000, %11111111, %00000000, %11111111, %00000000
+
+Code_Length:		EQU $-Code_Start+1
+
+			SAVESNA "Demo/demo_scroll.sna", Code_Start
