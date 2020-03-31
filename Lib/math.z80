@@ -1,0 +1,80 @@
+;
+; Title:	ZX Spectrum Math Routines
+; Author:	Dean Belfield
+; Created:	22/08/2011
+; Last Updated:	04/07/2012
+;
+; Requires:
+;
+; Modinfo:
+; 
+
+; 16 bit random number routine I found on the web
+; Returns a pseudo-random number in the HL register
+;
+Rand16_Seed:		EQU 12345
+
+Rand16:			LD DE,Rand16_Seed
+			LD A,D
+			LD H,E
+			LD L,253
+			OR A
+			SBC HL,DE
+			SBC A,0
+			SBC HL,DE
+			LD D,0
+			SBC A,D
+			LD E,A
+			SBC HL,DE
+			JR NC,Rand16_1
+			INC HL
+Rand16_1:		LD (Rand16+1),HL
+			RET
+
+; Square Root
+; HL=number to find square root of
+; Returns result in A
+;
+SQRT: 			LD DE,1
+			XOR A
+			DEC A
+SQRT_LOOP:		SBC HL,DE
+			INC DE
+			INC DE
+			INC A
+			JR NC,SQRT_LOOP
+			RET
+
+; Multiply
+; H = Multiplier
+; L = Multiplicand
+; Returns HL = Product
+;
+MULTIPLY:		LD E,L
+			LD L,0
+			LD D,0
+			SLA H
+			JR NC,$+3
+			LD L,E
+			ADD HL,HL
+			JR NC,$+3
+			ADD HL,DE
+			ADD HL,HL
+			JR NC,$+3
+			ADD HL,DE
+			ADD HL,HL
+			JR NC,$+3
+			ADD HL,DE
+			ADD HL,HL
+			JR NC,$+3
+			ADD HL,DE
+			ADD HL,HL
+			JR NC,$+3
+			ADD HL,DE
+			ADD HL,HL
+			JR NC,$+3
+			ADD HL,DE
+			ADD HL,HL
+			JR NC,$+3
+			ADD HL,DE
+			RET

@@ -1,0 +1,95 @@
+;
+; Title:        Macros
+; Author:       Dean Belfield
+; Created:	06/02/2020
+; Last updated: 06/02/2020
+;
+; Requires:	
+;
+; Modinfo:
+;
+
+LD_BC_A:		MACRO 
+			LD C, A 			; Turn A into 16 bit number 
+			ADD A, A			; Push sign into carry
+			SBC A, A 			; Turn into 0 or -1 (0xFF)
+			LD B, A				; Store in MSB
+			ENDM
+
+LD_DE_A:		MACRO 
+			LD E, A 
+			ADD A, A
+			SBC A, A 	
+			LD D, A	
+			ENDM
+
+LD_HL_A:		MACRO 
+			LD L, A 
+			ADD A, A
+			SBC A, A 
+			LD H, A		
+			ENDM
+
+ADD_HL_A:		MACRO 
+			ADD A, L
+			LD L,A 
+			JR NC, $+3
+			INC H 	
+			ENDM 
+
+ADD_DE_A:		MACRO 
+			ADD A, E 
+			LD E, A 
+			JR NC, $+3
+			INC D 
+			ENDM
+
+ADD_BC_A:		MACRO
+			ADD A,C 
+			LD C, A 
+			JR NC, $+3
+			INC B 
+			ENDM 
+
+ADD_BC_A_SIGNED:	MACRO
+			OR A 
+			JP P, $+4
+			DEC B
+			ADD A, C  
+			LD C, A 
+			ADC A, B 
+			SUB C 
+			LD B, A 
+			ENDM 
+
+ADD_DE_A_SIGNED:	MACRO
+			OR A 
+			JP P, $+4
+			DEC D
+			ADD A, E 
+			LD E, A 
+			ADC A, D 
+			SUB E 
+			LD D, A 
+			ENDM 
+
+ADD_HL_A_SIGNED:	MACRO
+			OR A 
+			JP P, $+4
+			DEC H
+			ADD A, L  
+			LD L, A 
+			ADC A, H 
+			SUB L 
+			LD H, A 
+			ENDM 
+
+SUB_HL_BC:		MACRO	
+			OR A 
+			SBC HL,BC
+			ENDM
+
+SUB_HL_DE:		MACRO 
+			OR A 
+			SBC HL,DE 
+			ENDM 

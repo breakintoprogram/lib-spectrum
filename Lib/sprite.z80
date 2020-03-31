@@ -1,0 +1,130 @@
+;
+; Title:	ZX Spectrum 48K Sprite Routines
+; Author:	Dean Belfield
+; Created:	20/08/2011
+; Last Updated:	02/07/2012
+;
+; Requires:	output.asm
+;
+; Modinfo:
+;
+; Subroutines Render_Sprites and Clear_Sprites now call Pixel_Address_Down for sake of readability
+;
+
+; This routine goes through the sprite logic table and runs the logic routine for each sprite
+;
+Handle_Sprites: 	LD IX,Sprite_Data			; The sprite data block
+			LD B,Sprite_Max				; The number of sprites to handle
+Handle_Sprites_1:	ld A,(IX+Sprite_Logic+1)		; Get the high address of the handler routine
+			AND A					; If it is zero
+			JR Z,Handle_Sprites_3			; Then don't process the sprite
+			LD HL,Handle_Sprites_2			; Set to the return address
+			PUSH BC					; Push the loop counter
+			PUSH IX					; Push the index register
+			PUSH HL					; Push the return address (to simulate a call)
+			LD H,A					; Set H to the previously fetched high address of handler routine
+			LD L,(IX+Sprite_Logic)			; Fetch the low address of the handler routine
+			LD A,(IX+Sprite_X)			; Store the current X and Y coordinates (for erase routine)
+			LD (IX+Sprite_X_Old),A
+			LD A,(IX+Sprite_Y)
+			LD (IX+Sprite_Y_Old),A
+			JP (HL)					; Jump to the handler. Return address is stacked, so RET from that routine
+Handle_Sprites_2:	POP IX					; This is the return address, so pop the index register
+			POP BC					; Pop the loop counter
+Handle_Sprites_3:	LD DE,Sprite_Data_Block_Size		; Go to next sprite data block
+			ADD IX,DE
+			DJNZ Handle_Sprites_1			; Loop until all sprites have been processed
+			RET
+
+; This routine renders the sprites
+; It's a bit of a work-in-progress but clears each sprite in turn before drawing it in the new position
+; HL = Address of sprite definition table
+;
+Render_Sprites:		LD (Render_Sprites_SM1+1),HL		; Store sprite definition table for later...
+			LD IX,Sprite_Data
+			LD B,Sprite_Max
+Render_Sprites_1:	LD A,(IX+Sprite_Logic+1)
+			AND A
+			JR Z,Render_Sprites_2
+			PUSH BC
+			LD B,(IX+Sprite_Y_Old)
+			LD C,(IX+Sprite_X_Old)
+			CALL Clear_Sprite
+			LD B,(IX+Sprite_Y)
+			LD C,(IX+Sprite_X)
+Render_Sprites_SM1:	LD DE,0
+			CALL Render_Sprite
+			POP BC
+Render_Sprites_2:	LD DE,Sprite_Data_Block_Size
+			ADD IX,DE
+			DJNZ Render_Sprites_1
+			RET
+
+; This routine draws a single sprite; again, work in progress. No off-screen clipping or masking yet
+; B = Y pixel position
+; C = X pixel position
+; DE = Address of sprite table (8 words; one word per pre-shifted sprite definition)
+;
+Render_Sprite:		CALL Get_Pixel_Address			; This routine is in output.asm
+			PUSH HL					; Store screen address temporarily
+			LD H,0					; Multiply pixel shift by 2
+			LD L,A
+			ADD HL,HL				; I think this is quicker than shifting L and H
+			ADD HL,DE				; Add base address of sprite table
+			LD E,(HL)				; Get sprite definition address
+			INC HL
+			LD D,(HL)
+			POP HL					; Get screen address back
+			LD B,16					; Height of sprite, in pixels
+Render_Sprite_1:	LD A,(DE)				; Fetch sprite definition
+			OR (HL)					; OR with contents of screen
+			LD (HL),A				; Write back to screen
+			INC DE					; Next byte of sprite definition
+			INC L					; Next byte of screen memory
+			LD A,(DE)				; Fetch and write again...
+			OR (HL)
+			LD (HL),A
+			INC DE
+			INC L
+			LD A,(DE)				; And again...
+			OR (HL)
+			LD (HL),A
+			INC DE
+			DEC L					; Go back to original screen address
+			DEC L
+			CALL Pixel_Address_Down
+Render_Sprite_2:	DJNZ Render_Sprite_1
+			RET
+
+; Clear a single sprite
+; B = Y pixel position
+; C = X pixel position
+;
+Clear_Sprite:		CALL Get_Pixel_Address			; This routine is in output.asm
+			LD B,16					; Height of sprite, in pixels
+Clear_Sprite_1		XOR A					; Clear A
+			LD (HL),A				; Write 3 0's to line
+			INC L					
+			LD (HL),A
+			INC L
+			LD (HL),A
+			DEC L					; Go back to original screen address
+			DEC L
+			CALL Pixel_Address_Down
+Clear_Sprite_2:		DJNZ Clear_Sprite_1
+			RET
+			
+Sprite_Image:		EQU 0x00
+Sprite_X:		EQU 0x01
+Sprite_Y:		EQU 0x02
+Sprite_w:		EQU 0x03
+Sprite_H:		EQU 0x04
+Sprite_Logic:		EQU 0x05
+Sprite_Flags:		EQU 0x07
+Sprite_X_Old:		EQU 0x08
+Sprite_Y_Old:		EQU 0x09
+
+Sprite_Data_Block_Size:	EQU 0x0A
+Sprite_Max:		EQU 0x0D
+
+Sprite_Data:		DEFS (Sprite_Max * Sprite_Data_Block_Size), 0

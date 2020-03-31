@@ -1,0 +1,66 @@
+;
+; Title:	GUI
+; Author:	Dean Belfield
+; Created:	06/02/2020
+; Last Updated:	06/02/2020	
+;
+; Requires:
+;
+; Modinfo:
+;
+
+; DE - Address of character set
+; HL - Screen address
+;  C - Box width ( > 2 )
+;  B - Box height ( > 2 )
+;
+Print_Box:	DEC C				; Decrement the loop counters to take edges into account
+		DEC B 
+		DEC B
+		CALL 3F				; The top and bottom ae the same, so call the end of our code
+		CALL Char_Address_Down		; Go down to next character line
+;
+; Do the middle bit
+;
+2:		PUSH BC
+		PUSH DE
+		PUSH HL
+		PUSH HL
+		CALL Print_UDG8
+		POP HL
+		LD A, C
+		ADD A, L 
+		LD L, A
+		CALL Print_UDG8
+		POP HL
+		POP DE
+		POP BC
+		CALL Char_Address_Down
+		DJNZ 2B
+		LD A, 16
+		ADD_DE_A
+;
+; This code is called at the top and it falls through here to put the top and bottom
+; bits of the panel on
+;
+3:		PUSH BC
+		PUSH HL
+		PUSH HL
+		CALL Print_UDG8
+		POP HL
+		INC L
+		DEC C
+4:		PUSH DE
+		PUSH HL
+		CALL Print_UDG8
+		POP HL
+		POP DE
+		INC L
+		DEC C 
+		JR NZ, 4B
+		LD A, 8
+		ADD_DE_A
+		CALL Print_UDG8
+		POP HL
+		POP BC
+		RET

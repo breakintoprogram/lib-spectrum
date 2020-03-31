@@ -1,0 +1,269 @@
+;
+; Title:	ZX Spectrum Stack Based Scroller
+; Author:	Dean Belfield
+; Created:	30/01/2020
+; Last Updated:	23/02/2020	
+;
+; Requires:	scroll_attr
+;
+; Modinfo:
+;
+; 30/01/2020	Initial proof-of-concept - missing mapping code
+; 03/02/2020	Tilesets for each row are now pulled from the map data
+; 05/02/2020	Tileset now has BC as blank tile - so 0x00 is now blank in map data rather than 0x20
+;		Fixed order of pops in Scroll_Tile_Part so that map tile graphics correctly map to map data
+; 		Added Scroll_BlockAtXY and Scroll_Move
+; 23/02/2020:	Minor tweaks to add scrolling colours (attributes)
+;
+
+			include "../lib/scroll_attr.z80"	; Extra code for scrolling the attributes
+						
+; Macros
+; 
+SCROLL_TILE_ROW:	MACRO	callbackAddress
+			LD HL, 0				; This will be the address of the tileset graphics
+			LD IX, callbackAddress			; The address of the self-modified push code
+			CALL Scroll_Tile_Full
+			ENDM
+
+; Move the scroll up or down a number of pixels
+;  A: Number of pixels to move the scroll
+;
+Scroll_Move:		LD HL, (Vertical_Scroll_Offset)
+			LD_BC_A
+			ADD HL, BC
+			BIT 7, H
+			JR Z, 1F				; If result positive, not reached top
+			LD HL, 0			 	; If we've reached the top, then zero the counter
+1:			LD (Vertical_Scroll_Offset), HL			
+			LD BC, 16 * (Demo_Map_Length - 12)	; Bottom boundary check
+			SUB_HL_BC
+			RET C
+			LD (Vertical_Scroll_Offset), BC
+			RET	
+
+; Get the scroll block value at map position (X,Y)
+;  HL: Map Array
+;   C: X position
+;   B: Y position
+; Returns:
+;  HL: Block address
+;   A: Block value
+;
+Scroll_BlockAtXY:	LD DE, (Vertical_Scroll_Offset)		; Get the vertical scroll offset (in pixels)
+			LD A, B					; And the sprite Y coordinate
+			ADD_DE_A				; Add them		
+			AND 0xF0				; Zero the lower nibble 
+			LD E, A
+			ADD HL, DE				; And add to the map table address
+			SRL C 					; Divide the X coordinate by 16
+			SRL C 
+			SRL C 
+			SRL C
+			LD A, 15				; Map is stored right-to-left
+			SUB C 					; So do 15 - E
+			LD E, A
+			LD D, 0
+			ADD HL, DE 				; Add them
+			LD A,(HL) 
+			RET 
+
+; Initialise
+; HL = Map Array (12 bytes long)
+;
+Initialise_Scroll:	LD DE, (Vertical_Scroll_Offset)		; Work out the map offset
+			LD A, E					; Mask out lower nibble
+			AND 0xF0				; to give us the index into
+			LD E,A					; the 16 byte wide map table
+			ADD HL, DE 				; Add to map address
+;
+; Write out the self-modding code for the scroll routine
+; HL - The address of the self-modified push code
+; IX - The address to store the tilest address in
+;
+			LUA ALLPASS
+			for i = 0, 12 do
+				_pc(string.format("LD DE, Scroll_Write_Row_%02d", i))
+				_pc(string.format("LD IX, Scroll_Tile_Mod_%02d + 1", i))
+				_pc(string.format("LD IY, Scroll_Attr_Mod_%02d + 1", i))
+				if i < 12 then
+					_pc("CALL Initialise_Scroll_0")
+				end
+			end
+			ENDLUA
+;
+; Drop straight into Initialise_Scroll_0 for the last row
+; 
+; Read a map row in and write out the self-modding code
+; Parameters:
+;  DE - Map
+;  HL - Buffer
+;  IX - Address to store the tileset pixel address in
+;  IY - Address to store the tileset attribute address in
+; The self-modding code is essentially a series of PUSH instructions
+; where each PUSH instruction corresponds to the tile that we want to 
+; display in that column. There are only 5 possible graphics, with
+; HL being reserved for a blank tile. The code is terminated with a JP
+; instruction back to the scroll routine
+;       C5 - Push BC = 00
+;       D5 - Push DE = 10
+;       E5 - Push HL = 20
+;       F5 - Push AF = 30
+;    DD E5 - Push IX = 40 (note IX and IY require two bytes written out)
+;    FD E5 - Push IY = 50
+; C3 LL HH - JP nn - where nn is the address of Scroll_Rentry_Point
+; Need a buffer size of 12 x 2 + 3
+; 
+Initialise_Scroll_0:	LD C, (HL)				; Get the tileset address
+			INC HL
+			LD B, (HL)
+			INC HL
+			LD (IX + 0), C				; Store the address of the tileset pixel data
+			LD (IX + 1), B
+			LD A, 12 * 16				; Get to the tileset attribute data (underneath the tileset)
+			ADD_BC_A
+			LD (IY + 0), C				; Store the address of the tileset attribute data
+			LD (IY + 1), B
+			INC HL					; Skip the spare two bytes
+			INC HL
+			LD B, 12				; Numbe of tile columns to write out
+			LD C, 0x40				; Use this to check for IX and IY
+			EX DE, HL
+Initialise_Scroll_1:	LD A,(DE)				; Get first map tile
+			AND 0xF0				; Only interested in top nibble
+			CP C					; Are we writing out AF, BC, DE or HL
+			JR C, Initialise_Scroll_1B		; Yes, so jump to write out a single byte PUSH
+			JR Z, Initialise_Scroll_IX		; If exactly 0x40 then jump to write out PUSH IX
+; Write out IY (FD E5)						; So we must be writing out IY at this point
+			LD (HL), 0xFD
+			INC HL
+			LD (HL), 0xE5
+			JR Initialise_Scroll_Ret
+; Write out IX (DD E5)
+;
+Initialise_Scroll_IX:	LD (HL), 0xDD
+			INC HL
+			LD (HL), 0xE5
+			JR Initialise_Scroll_Ret
+;
+; Write out AF, BC, DE, HL (C5, D5, E5 and F5)
+;			
+Initialise_Scroll_1B:	ADD A, 0xC5				; Quickly add 0xC5 to the tile # to get the PUSH opcode
+			LD (HL), A				; Write out the PUSH instruction here!
+;
+; Write out final JP instruction (C3 LL HH)
+;
+Initialise_Scroll_Ret:	INC HL					; Loop to next byte of memory to write out
+			INC DE					; And the next tile address
+			DJNZ Initialise_Scroll_1		; Jump to next tile column
+			LD (HL), 0xC3				; Here we're writing out a JP instruction
+			INC HL
+			LD (HL),low Scroll_Ret_Vector 		; These are self-modding with the correct value at
+			INC HL					; top of function Initialise_Scroll with the 
+			LD (HL),high Scroll_Ret_Vector
+			EX DE, HL
+			RET	
+
+; Stack-based scroll routine
+; Scrolls a 24x24 character block vertically - each tile is 16x16 pixels
+;	
+Scroll:			LD DE, Scroll_Ret			; Set the scroll return vector up
+			LD (Scroll_Ret_Vector+1), DE
+			LD DE, 0x4018				; Point to the screen
+Scroll_Tile_Mod_00:	LD HL, 0				; Point to tileset
+			LD IX, Scroll_Write_Row_00
+			LD A, (Vertical_Scroll_Offset)		; Get offset for first row into tileset
+			AND 15
+			LD C, A
+			SLA A					; Multiply by 12 (6 possible tiles in the set
+			ADD A, C
+			SLA A					; each of them a word wide
+			SLA A
+			LD B, 0					; Load into BC
+			LD C, A	
+			ADD HL, BC				; And add to the tile offset
+			LD A, (Vertical_Scroll_Offset)		; Get the # of lines to output for first tile
+			AND 15
+			LD B, A
+			LD A, 16
+			SUB B
+			LD B, A					; Partial number of rows for first tile
+			CALL Scroll_Tile_Part			; Draw the first partial row
+
+Scroll_Tile_Mod_01:	SCROLL_TILE_ROW Scroll_Write_Row_01	; Write out the 11 complete tile rows
+Scroll_Tile_Mod_02:	SCROLL_TILE_ROW Scroll_Write_Row_02 	; Using a macro to condense the code
+Scroll_Tile_Mod_03:	SCROLL_TILE_ROW Scroll_Write_Row_03	; The Scroll_Mod_nn labels are used to 
+Scroll_Tile_Mod_04:	SCROLL_TILE_ROW Scroll_Write_Row_04	; modify the first instruction of the
+Scroll_Tile_Mod_05:	SCROLL_TILE_ROW Scroll_Write_Row_05	; macro, LD HL, 0, with the tileset
+Scroll_Tile_Mod_06:	SCROLL_TILE_ROW Scroll_Write_Row_06	; address
+Scroll_Tile_Mod_07:	SCROLL_TILE_ROW Scroll_Write_Row_07
+Scroll_Tile_Mod_08:	SCROLL_TILE_ROW Scroll_Write_Row_08
+Scroll_Tile_Mod_09:	SCROLL_TILE_ROW Scroll_Write_Row_09
+Scroll_Tile_Mod_10:	SCROLL_TILE_ROW Scroll_Write_Row_10
+Scroll_Tile_Mod_11:	SCROLL_TILE_ROW Scroll_Write_Row_11
+
+Scroll_Tile_Mod_12:	LD HL, 0				; And finally, draw the end part if required
+			LD IX, Scroll_Write_Row_12
+			LD A, (Vertical_Scroll_Offset)
+			AND 15
+			RET Z
+			LD B, A
+			JR Scroll_Tile_Part
+
+; Write out a single row of tiles
+; HL - Address of the tileset for this row of tiles
+; DE - Screen Address
+; IX - Address of the routine to push out a pixel row of the tiles
+;
+Scroll_Tile_Full:	LD B, 16				; Set the tile height in B
+Scroll_Tile_Part:	LD (Scroll_03 + 1), SP			; Save the stack pointer
+			LD (Scroll_02 + 1), IX			; Save the draw line routine
+Scroll_01:		LD SP, HL				; Point the stack at the tileset
+			LD HL, 12				; Go to the next line of the tileset
+			ADD HL, SP
+			EXX					; Switch to alternate registers
+			POP BC,DE,HL,AF,IX,IY			; Pop the tileset into the AF, BC, DE', HL', IX and IY
+			EXX					; Switch back to normal registers
+			EX DE, HL				; Swap the screen address (in DE) into HL
+			LD SP, HL				; And load into the stack pointer
+			EXX					; Switch back to the alternate registers
+Scroll_02:		JP 0					; Write out a row of pixels
+Scroll_Ret:		EXX					; Switch back to the normal registers
+			EX DE, HL				; Swap DE and HL back again
+			INC D					; Drop down to the next pixel line of the screen
+			LD A, D
+			AND 0x07
+			JR NZ, Scroll_04			; If we've gone over a character boundary, then
+			LD A, E					; Drop down one character in screen memory
+			ADD A, 32
+			LD E, A
+			JR C, Scroll_04				; If we've gone over a screen third boundary
+			LD A, D					; Drop down to the next third
+			SUB 8
+			LD D,A
+Scroll_04:		DJNZ Scroll_01				; Loop
+Scroll_03:		LD SP, 0				; Restore the stack pointer
+			RET
+
+Scroll_Ret_Vector:	JP Scroll_Ret				; The return address for the scroll 
+
+Vertical_Scroll_Offset:	DW 0					; Vertical scroll offset
+
+; Buffer for all the PUSH instructions for a single scroll - self modded code written
+; by Initialise_Scroll is written in here
+; These are called in sequence in the function Scroll
+;
+Scroll_Write_Row_00:	DEFS 27, 0
+Scroll_Write_Row_01:	DEFS 27, 0
+Scroll_Write_Row_02:	DEFS 27, 0
+Scroll_Write_Row_03:	DEFS 27, 0
+Scroll_Write_Row_04:	DEFS 27, 0
+Scroll_Write_Row_05:	DEFS 27, 0
+Scroll_Write_Row_06:	DEFS 27, 0
+Scroll_Write_Row_07:	DEFS 27, 0
+Scroll_Write_Row_08:	DEFS 27, 0
+Scroll_Write_Row_09:	DEFS 27, 0
+Scroll_Write_Row_10:	DEFS 27, 0
+Scroll_Write_Row_11:	DEFS 27, 0
+Scroll_Write_Row_12:	DEFS 27, 0
+

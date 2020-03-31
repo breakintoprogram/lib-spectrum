@@ -1,0 +1,353 @@
+;
+; Title:	ZX Spectrum 48K Sprite Routines
+; Author:	Dean Belfield
+; Created:	29/01/2020
+; Last Updated:	09/02/2020
+;
+; Requires:	output.asm
+;
+; Modinfo:
+;
+; 03/02/2020:	Sprite width and height now stored in sprite table
+; 09/02/2020:	Added Get_Next_Sprite
+
+INITIALISE_SPRITE:	MACRO p_X, p_Y, p_IMAGE, p_LOGIC
+			LD (IY+Sprite_X), p_X
+			LD (IY+Sprite_Y), p_Y
+			LD (IY+Sprite_Logic+0), low  p_LOGIC
+			LD (IY+Sprite_Logic+1), high p_LOGIC 
+			LD (IY+Sprite_Image+0), low  p_IMAGE
+			LD (IY+Sprite_Image+1), high p_IMAGE
+			ENDM
+
+; This routine clears the sprite logic table
+;
+Clear_Sprite_Slots:	LD IX, Sprite_Data
+			LD DE, Sprite_Data_Block_Size
+			LD B, Sprite_Max
+1:			LD (IX+Sprite_Logic+1), 0
+			ADD IX, DE
+			DJNZ 1B
+			RET	
+
+; This routine goes through the sprite logic table and finds the next available
+; slot
+; Returns
+;  A: Z if slot found, NZ if no more slote available
+; IY: Address of sprite slot (usually called from logic, which uses IX)
+;
+Get_Sprite_Slot:	LD IY, Sprite_Data
+			LD DE, Sprite_Data_Block_Size
+			LD B, Sprite_Max
+1:			LD A, (IY+Sprite_Logic+1)
+			AND A
+			RET Z
+			ADD IY, DE
+			DJNZ 1B
+			RET
+
+; Scroll adjust sprites
+; Moves sprites in opposite direction
+; A - Scroll offset (as passed to Scroll_Move)
+;
+Scroll_Adjust_Sprites:	LD IY, Sprite_Data
+			LD DE, Sprite_Data_Block_Size
+			LD B, Sprite_Max
+			NEG
+			LD C, A
+1:			LD A, (IY+Sprite_Logic+1)
+			AND A
+			JR Z, 2F
+			LD A, (IY+Sprite_Y)
+			ADD A, C
+			LD (IY+Sprite_Y), A
+2:			ADD IY, DE
+			DJNZ 1B
+			RET	
+			
+; This routine goes through the sprite logic table and runs the logic routine for each sprite
+;
+Handle_Sprites: 	LD (Handle_Sprites_SP + 1), SP		; Clear th sort table
+			LD SP,Sprite_Sort_Table_End		; Set it to the end of the self modifying code area
+			LD B,Sprite_Sort_Table_Size 		; Number of buckets to clear
+			LD DE,0					; We're zeroing the memory
+1:			PUSH DE					; Push 4 words into the area
+			DJNZ 1B
+Handle_Sprites_SP:	LD SP,0					; Restore the stack pointer
+			LD IX,Sprite_Data			; The sprite data block
+			LD B,Sprite_Max				; The number of sprites to handle
+2:			LD A,(IX+Sprite_Logic+1)		; Get the high address of the handler routine
+			AND A					; If it is zero
+			JR Z,3F					; Then don't process the sprite
+			PUSH BC					; Push the loop counter
+			PUSH IX					; Push the index register
+			LD HL,Handle_Sprites_RA			; Set to the return address
+			PUSH HL					; Push the return address (to simulate a call)
+			LD H,A					; Set H to the previously fetched high address of handler routine
+			LD L,(IX+Sprite_Logic)			; Fetch the low address of the handler routine
+			JP (HL)					; Jump to the handler. Return address is stacked, so RET from that routine
+Handle_Sprites_RA:	POP IX					; Pop the index register
+			LD A, (IX+Sprite_Y)			; Get the Y coordinate
+			CP 191					; Check for off screen (temporary value)
+			CALL C, Sort_Sprite			; Sort the sprite
+			POP BC					; Pop the loop counter
+3:			LD DE,Sprite_Data_Block_Size		; Go to next sprite data block
+			ADD IX,DE
+			DJNZ 2B					; Loop until all sprites have been processed
+			RET
+
+; Create the sorted table of sprites
+; A: Y address of sprite
+;
+Sort_Sprite:		LD HL,Sprite_Sort_Table + 1		; Address of the sort table
+			AND 0xF0				; Get the top 16 bits
+			SRL A					; Divide by 8
+			SRL A
+			SRL A
+			LD C,A					; Stick in BC
+			LD B,0
+			ADD HL,BC				; Point it to the correct bucket
+Sort_Sprite_1:		LD A,(HL)				; See if bucket clear
+			AND A					; Check for A=0
+			JR Z,Sort_Sprite_2			; If zero, then bucket empty - jump to insert code
+			INC HL
+			INC HL
+			JR Sort_Sprite_1
+Sort_Sprite_2:		LD A,IXH
+			LD (HL),A				; Store the sprite data address in the bucket
+			DEC HL
+			LD A,IXL
+			LD (HL),A
+			RET
+
+; Render the sprites
+;
+Render_Sprites:		LD IY,Sprite_Sort_Table
+			LD B,Sprite_Sort_Table_Size
+Render_Sprites_0:	PUSH BC
+			LD A,(IY+1)
+			AND A
+			JR Z,Render_Sprites_1
+			LD IXH,A
+			LD A,(IY+0)
+			LD IXL,A
+			LD E,(IX+Sprite_Image)
+			LD D,(IX+Sprite_Image+1)
+			LD C,(IX+Sprite_X)
+			LD B,(IX+Sprite_Y)
+			CALL Render_Sprite
+Render_Sprites_1:	POP BC
+			INC IY
+			INC IY
+			DJNZ Render_Sprites_0
+			RET
+
+; This routine draws a single sprite; again, work in progress. No off-screen clipping or masking yet
+; B = Y pixel postion
+; C = X pixel position
+; DE = Address of sprite table - 20 bytes
+; - width (1 byte)        : width of sprite in characters - only supports 2 at the moment
+; - height (1 byte)       : sprite height in pixels
+; - definitions (8 words) : one word per pre-shifted sprite definition
+;
+Render_Sprite:		LD A,(DE)				; The sprite width 
+			INC DE
+			CP 3
+			JP Z, Render_Sprite_24px
+			CP 2
+			JP Z, Render_Sprite_16px
+			CP 1
+			RET NZ
+
+Render_Sprite_8px:	LD A,(DE)				; Get the sprite height
+			INC DE
+			LD (Render_Sprite_8px_H + 1), A		; Store H for later
+;
+; Y clipping
+;
+			ADD A, B 				; Add Y to it
+			CP 192 					; Compare with screen H
+			JR C, 0F				; If entirely on screen, then output
+			LD A, B
+			NEG
+			ADD A, 192
+			LD (Render_Sprite_8px_H + 1), A		; Store the clipped height
+
+0:			CALL Get_Pixel_Address			; HL = Screen Address, A = Pixel in Row
+			EX DE,HL				; HL = Sprite, DE = Screen
+			SLA A					; Multiply pixel shift by 2
+			LD B,0
+			LD C,A
+			ADD HL,BC				; Add base address of sprite table
+			LD A,(HL)				; Get sprite definition address
+			INC HL
+			LD H,(HL)
+			LD L,A					; HL = Sprite, DE = Screen
+			LD (Render_Sprite_8px_SP+ 1), SP	; Preserve the stack pointer
+			LD SP, HL				; Store in SP
+			EX DE,HL				; HL = Screen, SP = Sprite
+Render_Sprite_8px_H:	LD B, 16				; Height of sprite, in pixels
+1:			POP DE					; Fetch first word of sprite (E = mask, D = sprite)
+			LD A,(HL)				; Fetch screen data
+			AND E					; AND with mask
+			OR D					; OR with data
+			LD (HL),A				; Store back in screen
+			INC L					; To next screen location
+			POP DE					; And a third time...
+			LD A,(HL)
+			AND E
+			OR D
+			LD (HL), A
+			DEC L
+			INC H					; Drop down to the next pixel line of the screen
+			LD A, H
+			AND 0x07
+			JR NZ, 2F
+			LD A, L
+			ADD A, 32
+			LD L, A
+			JR C, 2F
+			LD A, H			
+			SUB 8
+			LD H,A
+2:			DJNZ 1B				
+Render_Sprite_8px_SP:	LD SP,0					; Restore the stack pointer
+			RET
+
+Render_Sprite_16px:	LD A,(DE)				; Get the sprite height
+			INC DE
+			LD (Render_Sprite_16px_H + 1), A	; Store H for later
+;
+; Y clipping
+;
+			ADD A, B 				; Add Y to it
+			CP 192 					; Compare with screen H
+			JR C, 0F				; If entirely on screen, then output
+			LD A, B
+			NEG
+			ADD A, 192
+			LD (Render_Sprite_16px_H + 1), A	; Store the clipped height
+
+0:			CALL Get_Pixel_Address			; HL = Screen Address, A = Pixel in Row
+			EX DE,HL				; HL = Sprite, DE = Screen
+			SLA A					; Multiply pixel shift by 2
+			LD B,0
+			LD C,A
+			ADD HL,BC				; Add base address of sprite table
+			LD A,(HL)				; Get sprite definition address
+			INC HL
+			LD H,(HL)
+			LD L,A					; HL = Sprite, DE = Screen
+			LD (Render_Sprite_16px_SP+ 1), SP	; Preserve the stack pointer
+			LD SP, HL				; Store in SP
+			EX DE,HL				; HL = Screen, SP = Sprite
+Render_Sprite_16px_H:	LD B, 16				; Height of sprite, in pixels
+1:			DUP 2
+			POP DE					; Fetch first word of sprite (E = mask, D = sprite)
+			LD A,(HL)				; Fetch screen data
+			AND E					; AND with mask
+			OR D					; OR with data
+			LD (HL),A				; Store back in screen
+			INC L					; To next screen location
+			EDUP
+			POP DE					; And a third time...
+			LD A,(HL)
+			AND E
+			OR D
+			LD (HL), A
+			DEC L					; Go back to original screen address
+			DEC L
+			INC H					; Drop down to the next pixel line of the screen
+			LD A, H
+			AND 0x07
+			JR NZ, 2F
+			LD A, L
+			ADD A, 32
+			LD L, A
+			JR C, 2F
+			LD A, H			
+			SUB 8
+			LD H,A
+2:			DJNZ 1B				
+Render_Sprite_16px_SP:	LD SP,0					; Restore the stack pointer
+			RET
+
+Render_Sprite_24px:	LD A,(DE)				; Get the sprite height
+			INC DE
+			LD (Render_Sprite_24px_H + 1), A	; Store H for later
+;
+; Y clipping
+;
+			ADD A, B 				; Add Y to it
+			CP 192 					; Compare with screen H
+			JR C, 0F				; If entirely on screen, then output
+			LD A, B
+			NEG
+			ADD A, 192
+			LD (Render_Sprite_24px_H + 1), A	; Store the clipped height
+
+0:			CALL Get_Pixel_Address			; HL = Screen Address, A = Pixel in Row
+			EX DE,HL				; HL = Sprite, DE = Screen
+			SLA A					; Multiply pixel shift by 2
+			LD B,0
+			LD C,A
+			ADD HL,BC				; Add base address of sprite table
+			LD A,(HL)				; Get sprite definition address
+			INC HL
+			LD H,(HL)
+			LD L,A					; HL = Sprite, DE = Screen
+			LD (Render_Sprite_24px_SP+ 1), SP	; Preserve the stack pointer
+			LD SP, HL				; Store in SP
+			EX DE,HL				; HL = Screen, SP = Sprite
+Render_Sprite_24px_H:	LD B, 16				; Height of sprite, in pixels
+1:			DUP 3
+			POP DE					; Fetch first word of sprite (E = mask, D = sprite)
+			LD A,(HL)				; Fetch screen data
+			AND E					; AND with mask
+			OR D					; OR with data
+			LD (HL),A				; Store back in screen
+			INC L					; To next screen location
+			EDUP
+			POP DE					; And a third time...
+			LD A,(HL)
+			AND E
+			OR D
+			LD (HL), A
+			DEC L					; Go back to original screen address
+			DEC L
+			DEC L
+			INC H					; Drop down to the next pixel line of the screen
+			LD A, H
+			AND 0x07
+			JR NZ, 2F
+			LD A, L
+			ADD A, 32
+			LD L, A
+			JR C, 2F
+			LD A, H			
+			SUB 8
+			LD H,A
+2:			DJNZ 1B				
+Render_Sprite_24px_SP:	LD SP,0					; Restore the stack pointer
+			RET
+	
+Sprite_Image:		EQU 0x00
+Sprite_X:		EQU 0x02
+Sprite_Y:		EQU 0x03
+Sprite_Logic:		EQU 0x04
+Sprite_Flags:		EQU 0x06
+Sprite_Data_1:		EQU 0x07
+Sprite_Data_2:		EQU 0x08
+Sprite_Data_3:		EQU 0x09
+Sprite_Data_4:		EQU 0x0A
+Sprite_Data_5:		EQU 0x0B
+
+Sprite_Data_Block_Size:	EQU 0x0C
+Sprite_Max:		EQU 0x10
+Sprite_Data_Len:	EQU Sprite_Max * Sprite_Data_Block_Size
+Sprite_Sort_Table_Size:	EQU Sprite_Max * 2
+Sprite_Sort_Table_Len:	EQU Sprite_Sort_Table_Size * 2
+
+Sprite_Data:		DEFS Sprite_Data_Len, 0
+Sprite_Sort_Table:	DEFS Sprite_Sort_Table_Len, 0
+Sprite_Sort_Table_End:	EQU  $

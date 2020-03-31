@@ -1,0 +1,78 @@
+;
+; Title:	ZX Spectrum Screen Buffer Routines
+; Author:	Dean Belfield
+; Created:	20/08/2011
+; Last Updated:	08/02/2020
+;
+; Requires:
+;
+; Modinfo:
+;
+; 04/07/2012:	Added Clear_Screen and Clear_Screen_Fast routines
+; 08/02/2010:	Moved Clear_Screen to output.z80
+;
+
+; Fast clear-screen routine
+; Uses the stack to block clear memory
+;
+Clear_Screen_Fast:	LD (Clear_Screen_Fast_End+1),SP	; Store the stack (self modding code)
+			LD SP,0x5800			; Set stack to end of screen
+			LD DE,0x0000			; We are clearing, so set DE to 0
+			LD B,0				; We loop 256 times - 12 words * 256 = 6144 bytes
+Clear_Screen_Fast_Loop:	DS 12,0xD5			; 0xD5 is the code for PUSH DE - this is 12 PUSH DE's			
+			DJNZ Clear_Screen_Fast_Loop
+Clear_Screen_Fast_End:	LD SP,0x0000			; Restore the stack
+			RET
+
+; A voodoo screen buffer routine that uses the stack to quickly shift bytes around
+; HL: Location of offscreen buffer
+;
+Copy_Screen:		LD (Copy_Screen_End+1),SP ; This is some self-modifying code; stores the stack pointer in an LD SP,nn instruction at the end
+			EXX
+			LD HL,16384+16            ; Where the actual screen is, but as we're using the stack it's the right hand side of the buffer
+Copy_Screen_Loop:	EXX
+			LD SP,HL
+			POP AF
+			POP BC
+			POP DE
+			POP IX
+			EXX
+			EX AF,AF'
+			POP AF
+			POP BC
+			POP DE
+			POP IY
+			LD SP,HL
+			PUSH IY
+			PUSH DE
+			PUSH BC
+			PUSH AF
+			EX AF,AF'
+			EXX
+			PUSH IX
+			PUSH DE
+			PUSH BC
+			PUSH AF
+			LD DE,16
+			ADD HL,DE
+			EXX
+			INC H
+			LD A,H
+			AND 0x07
+			JR NZ,Copy_Screen_Loop
+			LD A,H
+			SUB 8
+			LD H,A
+			ld A,L
+			ADD A,32
+			LD L,A
+			JR NC,Copy_Screen_Loop
+			LD A,H
+			ADD A,8
+			LD H,A
+			CP 0x58
+			JR NZ,Copy_Screen_Loop
+Copy_Screen_End:	LD SP,0
+			EXX
+			RET
+

@@ -1,0 +1,32 @@
+;
+; Title:	Score
+; Author:	Dean Belfield
+; Created:	06/02/2020
+; Last Updated:	06/02/2020	
+;
+; Requires:
+;
+; Modinfo:
+;
+
+; Add to a score
+; DE: Score to add (in BCD)
+; IX: Score address
+;
+ADD_SCORE:		LD A, E
+			ADD A, (IX+3)
+			DAA
+			LD (IX+3), A
+			LD A, D
+			ADC A, (IX+2)
+			DAA
+			LD (IX+2), A
+			LD A, 0
+			ADC A, (IX+1)
+			DAA
+			LD (IX+1), A
+			LD A, 0
+			ADC A, (IX+0)
+			DAA
+			LD (IX+0), A
+			RET

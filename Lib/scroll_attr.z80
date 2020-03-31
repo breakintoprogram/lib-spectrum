@@ -1,0 +1,96 @@
+;
+; Title:	ZX Spectrum Stack Based Scroller
+; Author:	Dean Belfield
+; Created:	23/02/2020
+; Last Updated:	23/02/2020	
+;
+; Requires:	scroll
+;
+; Modinfo:
+;
+
+; Macros
+;
+SCROLL_ATTR_ROW:	MACRO	callbackAddress, mask
+			LD HL, 0				; This will be the address of the tileset colours
+			LD IX, callbackAddress			; The address of the self-modified push code
+			LD C, mask
+			CALL Scroll_Attr_Full
+			ENDM
+
+Scroll_Attr:		LD DE, Scroll_Attr_Ret			; Set the scroll return address vector up
+			LD (Scroll_Ret_Vector+1), DE
+			LD DE, 0x5818				; Point to the screen attributes
+
+Scroll_Attr_Mod_00:	LD HL, 0				; Point to tileset colours
+			LD IX, Scroll_Write_Row_00
+			LD A, (Vertical_Scroll_Offset)		; Get offset for first row into tileset
+			AND 8					; Get the colour offset (0 or 8)
+			LD C, A
+			SRL A 					; Divide by 2
+			ADD A,C 				; Add to the original value
+			LD B, 0					; Load into BC
+			LD C, A	
+			ADD HL, BC				; And add to the tile offset
+			LD A, (Vertical_Scroll_Offset)		; Get the # of lines to output for first tile
+			AND 8
+			SRL A 
+			SRL A
+			SRL A
+			LD B, A
+			LD A, 2
+			SUB B
+			LD B, A					; Partial number of rows for first tile
+			CALL Scroll_Attr_Part			; Draw the first partial row
+
+Scroll_Attr_Mod_01:	SCROLL_ATTR_ROW Scroll_Write_Row_01, 0	; Write out the 11 complete tile rows
+Scroll_Attr_Mod_02:	SCROLL_ATTR_ROW Scroll_Write_Row_02, 1 	; Using a macro to condense the code
+Scroll_Attr_Mod_03:	SCROLL_ATTR_ROW Scroll_Write_Row_03, 2	; The Scroll_Mod_nn labels are used to 
+Scroll_Attr_Mod_04:	SCROLL_ATTR_ROW Scroll_Write_Row_04, 3	; modify the first instruction of the
+Scroll_Attr_Mod_05:	SCROLL_ATTR_ROW Scroll_Write_Row_05, 0	; macro, LD HL, 0, with the tileset
+Scroll_Attr_Mod_06:	SCROLL_ATTR_ROW Scroll_Write_Row_06, 1	; address
+Scroll_Attr_Mod_07:	SCROLL_ATTR_ROW Scroll_Write_Row_07, 2
+Scroll_Attr_Mod_08:	SCROLL_ATTR_ROW Scroll_Write_Row_08, 3
+Scroll_Attr_Mod_09:	SCROLL_ATTR_ROW Scroll_Write_Row_09, 0
+Scroll_Attr_Mod_10:	SCROLL_ATTR_ROW Scroll_Write_Row_10, 1
+Scroll_Attr_Mod_11:	SCROLL_ATTR_ROW Scroll_Write_Row_11, 2
+
+Scroll_Attr_Mod_12:	LD HL, 0				; Point to tileset colours
+			RET
+
+; Write out a single colourset for a row of tiles
+; HL - Address of the colourset for this row of tiles
+; DE - Screen Address
+; IX - Address of the routine to push out a pixel row of the tiles
+;  C - Mask (to only update some attribute rows at at time)
+;	
+Scroll_Attr_Full:	LD B, 2
+			LD A, (Vertical_Scroll_Offset)
+			AND 3
+			CP C
+			JR Z, Scroll_Attr_Part
+			LD A, 64
+			ADD_DE_A
+			RET
+Scroll_Attr_Part:	LD (Scroll_Attr_SP + 1), SP
+			LD (Scroll_Attr_02 + 1), IX
+Scroll_Attr_01:		LD SP, HL	; Point HL at the colour data
+			LD HL, 12
+			ADD HL, SP
+			EXX
+			POP BC, DE, HL, AF, IX, IY
+			EXX
+			EX DE, HL	; Swap the screen address (in DE) into HL
+			LD SP, HL	; And load into the SP
+			EXX
+Scroll_Attr_02:		JP 0
+Scroll_Attr_Ret:	EXX 
+			EX DE, HL
+			LD A, E
+			ADD A, 32
+			LD E, A
+			JR NC, 1F
+			INC D
+1:			DJNZ Scroll_Attr_01
+Scroll_Attr_SP:		LD SP, 0
+			RET
