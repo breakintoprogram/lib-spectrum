@@ -1,0 +1,309 @@
+;
+; Title:	ZX Spectrum Vector Output Routines
+; Author:	Dean Belfield
+; Created:	01/04/2020
+; Last Updated:	01/04/2020
+;
+; Requires:	output.asm
+;
+; Modinfo:
+;
+
+; EQUS
+;
+Vector_Table_X1		EQU 0xFD00			; These tables needs to be on a page boundary and 
+Vector_Table_X2		EQU Vector_Table_X1+0x100	; next to each other
+
+; Macros
+;
+VT_LINE:		MACRO	TABLE,PX1,PY1,PX2,PY2
+			LD HL,TABLE
+			LD C,(IY+PX1)
+			LD B,(IY+PY1)
+			LD E,(IY+PX2)
+			LD D,(IY+PY2)
+			CALL Draw_Line_Table
+			ENDM
+
+; Get the absolute distance between two points
+;
+ABS_DELTA:		MACRO	P1,P2,REG
+			LD A,P2
+			SUB P1
+			JR NC, $+4
+			NEG
+			LD REG, A
+			ENDM
+
+; Draw a filled triangle
+; IY: Pointer to 3 bytes worth of coordinate data
+; HL: 8-Byte texture address
+;
+Draw_Triangle_Filled:	LD (Draw_Vector_Table_1+1),HL	; Store the texture address (8 bytes)
+;
+; Get the thre side heights in B, C and D so we can determine which is longest
+;
+			ABS_DELTA (IY+1), (IY+3), B	; Side 1
+			ABS_DELTA (IY+3), (IY+5), C	; Side 2
+			ABS_DELTA (IY+5), (IY+1), D	; Side 3
+;
+; Now work out which line is longest, and draw that in Vector_Table_X1. The other
+; two shorter lines will be drawn in Vector_Table_X2
+; First start by comparing Side 1 with Side 2 and Side 3
+;
+			LD A,C 				; Get Side 2
+			CP B 				; Compare with Side 1
+			JR C, 1F			; Skip if Side 1 is greater
+			CP D				; Compare with Side 3
+			JR C, 1F			; Skip if Side 3 is greater	
+;
+; Side 2 is the longest
+;
+			VT_LINE Vector_Table_X2,0,1,2,3	; Side 1
+			VT_LINE Vector_Table_X1,2,3,4,5	; Side 2
+			VT_LINE Vector_Table_X2,4,5,0,1	; Side 3
+			LD L, (IY + 3)			; L and A contain the Y points
+			LD A, (IY + 5)			; of the longest line
+			JR 3F 
+
+;
+; Now check to see which of Side 1 or Side 3 is the longest
+;
+1:			LD A,B 				; Get Side 1
+			CP D 				; Compare with Side 3
+			JR C, 2F			; Skip if Side 3 is greater
+;
+; Side 1 is the longest
+;
+
+			VT_LINE Vector_Table_X1,0,1,2,3	; Side 1
+			VT_LINE Vector_Table_X2,2,3,4,5	; Side 2
+			VT_LINE Vector_Table_X2,4,5,0,1	; Side 3
+			LD L, (IY + 1)			; L and A contain the Y points
+			LD A, (IY + 3)			; of the longest line
+			JR 3F 
+;
+; Side 3 is the longest
+;
+2:
+			VT_LINE Vector_Table_X2,0,1,2,3	; Side 1
+			VT_LINE Vector_Table_X2,2,3,4,5	; Side 2
+			VT_LINE Vector_Table_X1,4,5,0,1	; Side 3
+			LD L, (IY + 5)			; L and A contain the Y points
+			LD A, (IY + 1)			; of the longest line
+;
+; Calculate the top of the triangle
+; L: The top of the triangle
+; A: The bottom of the triangle
+;
+3:			CP L				; Compare top with bottom
+			JR NC, 4F			; Skip if bottom is greater than top
+			LD H,A       			; Swap A and L
+			LD A,L				; using H as a scratchpad register
+			LD L,H
+4:			SUB L 				; Subtract the bottom from the top to get the
+			LD B,A 				; height in B
+
+			RET Z				; Ret if Z - would loop 256 times
+;
+; Draw the contents of the vector tables
+; L: Start Y position
+; B: Length
+;
+Draw_Vector_Table:	LD H,high Vector_Table_X1	; Get the LHS table in L - HL is now a pointer in that table
+1:			PUSH BC, HL			; Push the table pointer and loop value
+			LD C,(HL)			; Get X1 from the first table
+			INC H				; Increment H to the second table (they're a page apart)
+			LD E,(HL)			; Get X2 from the second table
+			LD B, L				; The Y coordinate is L
+			LD A,L				; Now calculate the index into the texture table
+			AND 7				; by getting the Y coordinate, ANDing with 7, and
+Draw_Vector_Table_1:	LD HL,0				; adding to the texture address, which has been self-modded into here
+			ADD_HL_A			; Add it as an offst into that table
+			LD A,(HL)			; And fetch the texture byte
+			CALL Draw_Horz_Line_Texture	; Draw the horizontal line
+			POP HL, BC			; Pop the table pointer and loop value
+			INC L				; Increment to next line in table
+			DJNZ 1B				; Loop until complete
+			RET 
+
+; Draw a line into the vector table
+; HL = Vector Table
+; B = Y pixel position 1
+; C = X pixel position 1
+; D = Y pixel position 2
+; E = X pixel position 2
+;
+Draw_Line_Table:	LD A,D				; Check whether we are going to be drawing up
+			CP B
+			JR NC, 3F
+
+			PUSH BC				; If we are, then this neat trick swaps BC and DE
+			PUSH DE				; using the stack, forcing the line to be always
+			POP BC				; drawn downwards
+			POP DE
+
+3:			LD L, B				; Y address -> index of table	
+			LD A, C				; X address
+			PUSH AF				; Stack the X address	
+			LD A, D				; Calculate the line height in B
+			SUB B
+			LD B, A 
+			LD A, E				; Calculate the line width
+			SUB C 
+			JR C, 4F
+; 
+; This bit of code mods the main loop for drawing left to right
+;
+			LD C, A				; Store the line width
+			LD A,0x14			; Opcode for INC D
+			JR  5F
+;
+; This bit of code mods the main loop for drawing right to left
+;
+4:			NEG
+			LD C,A
+			LD A,0x15			; Opcode for DEC D
+;
+; We've got the basic information at this point
+;
+5:			LD (Draw_Line_Table_Q1_M2), A	; Code for INC D or DEC D
+			LD (Draw_Line_Table_Q2_M2), A
+			POP AF				; Pop the X address
+			LD D, A				; And store in the D register
+			LD A, B				; Check if B and C are 0
+			OR C 
+			JR NZ, Draw_Line_Table_Q	; There is a line to draw, so skip to the next bit
+			LD (HL), D 			; Otherwise just plot the point into the table
+			RET
+;			
+; At this point
+; HL = Table address
+;  B = Line height
+;  C = Line width
+;  D = X Position
+;
+Draw_Line_Table_Q:	LD A,B				; Work out which diagonal we are on
+			CP C
+			JR NC,Draw_Line_Table_Q2
+;
+; This bit of code draws the line where B<C (more horizontal than vertical)
+;
+Draw_Line_Table_Q1:	LD A,C
+			LD (Draw_Line_Table_Q1_M1+1), A	; Self-mod the code to store the line width
+			LD C,B
+			LD B,A
+			LD E,C				; Calculate the error value
+			SRL E
+1:			LD A,E
+			SUB C
+			LD E,A
+			JR NC,Draw_Line_Table_Q1_M2
+Draw_Line_Table_Q1_M1:	ADD A, 0			; Add the line height (self modifying code)
+			LD E,A
+			LD (HL),D			; Store the X position
+			INC L				; Go to next pixel position down
+Draw_Line_Table_Q1_M2:	INC D				; Increment or decrement the X coordinate (self-modding code)
+			DJNZ 1B				; Loop until the line is drawn
+			LD (HL),D
+			RET
+;
+; This bit draws the line where B>=C (more vertical than horizontal, or diagonal)
+;
+Draw_Line_Table_Q2:	LD (Draw_Line_Table_Q2_M1+1), A	; Self-mod the code to store the line width
+			LD E,C				; Calculate the error value
+			SRL E
+1:			LD (HL),D			; Store the X position
+			LD A,E				; Get the error value
+			SUB C				; Add the line length to it (X2-X1)
+			JR NC,2F			; Skip the next bit if we don't get a carry
+Draw_Line_Table_Q2_M1: 	ADD A,0				; Add the line height (self modifying code)
+Draw_Line_Table_Q2_M2:	INC D				; Increment or decrement the X coordinate (self-modding code)
+2:			LD E,A				; Store the error value back in
+			INC L				; And also move down
+			DJNZ 1B
+			LD (HL),D
+			RET
+
+; Draw Horizontal Line routine
+; B = Y coordinate
+; C = X pixel position 1
+; E = X pixel position 2
+;
+Draw_Horz_Line_Solid:	LD A,0xFF			; Set texture to all 1's and drop through...
+
+; Draw Horizontal Line routine with texture
+; B = Y coordinate
+; C = X pixel position 1
+; E = X pixel position 2
+; A = Texture byte
+;
+Draw_Horz_Line_Texture:	LD IXL,A			; Store the texture byte
+			LD A,E				; Make sure we're always drawing left to right
+			CP C
+			JR NC,Draw_Horz_Line_1
+			LD E,C				; Swap X coordinates round if not
+			LD C,A
+Draw_Horz_Line_1:	CALL Get_Pixel_Address		; Get the screen address of the left point
+			EX AF,AF'			; Store in DE,A'
+			EX DE,HL			; So E (X pixel position 2) will now be in L
+			LD C,L
+			CALL Get_Pixel_Address		; Get the screen address of the right point
+;
+; At this point, we have:
+; DE = Screen address of point 1
+; A' = Pixel position of point 1 (0-7)
+; HL = Screen address of point 2
+; A  = Pixel position of point 2 (0-7)
+;
+			LD BC,Plot_Line_RHS		; Point BC to the table for the RHS pixel data
+			ADD A,C
+			LD C,A
+			LD A,L				; We have a special case if both points in same character
+			CP E
+			JR NZ,Draw_Horz_Line_2		; Special case if both points in same character square
+			EX AF,AF'
+			LD HL,Plot_Line_LHS		; Get the LHS pixel data
+			ADD A,L
+			LD L,A
+			LD A,(BC)			; XOR the RHS and LHS pixel data
+			XOR (HL)
+			CPL				; CPL it (so all 1's become 0's and 0's become 1's)
+			AND IXL				; Mask with the texture byte
+			EX DE, HL			; This is now the data we are going to draw
+			OR (HL)
+			LD (HL),A
+			RET				; Nothing more to do at this point, so return
+Draw_Horz_Line_2:	LD A,(BC)			; Plot the RHS end
+			AND IXL
+			OR (HL)
+			LD (HL),A
+			DEC L				; Go left one character
+			LD A,L				; Skip next bit if no between fill to do
+			CP E
+			JR Z,Draw_Horz_Line_End	
+Draw_Horz_Line_M1:	LD D,IXL			; Stick the texture byte in D for speed
+Draw_Horz_Line_Loop:	LD (HL),D			; Draw a filler byte
+			DEC L				; Go left one character
+			LD A,E				; Loop until we reach the left hand point character square
+			CP L
+			JR NZ,Draw_Horz_Line_Loop
+Draw_Horz_Line_End:	EX AF,AF'			; Plot the LHS end
+			LD BC,Plot_Line_LHS
+			ADD A,C
+			LD C,A
+			LD A,(BC)
+			AND IXL
+			OR (HL)
+			LD (HL),A
+			RET
+
+; End-points for the horizontal lines
+;
+Plot_Line_LHS:		DB %11111111,%01111111,%00111111,%00011111,%00001111,%00000111,%00000011,%00000001
+Plot_Line_RHS:		DB %10000000,%11000000,%11100000,%11110000,%11111000,%11111100,%11111110,%11111111
+
+; Some sample textures
+;
+Vector_Texture_01:	DB %10101010,%01010101,%10101010,%01010101,%10101010,%01010101,%10101010,%01010101
+Vector_Texture_02:	DB %10000001,%01000010,%00100100,%00011000,%00011000,%00100100,%01000010,%10000001
