@@ -6,18 +6,22 @@
 	"configurations": [
 		{
 			"name": "Z80 Debugger",
-			"type": "z80-debug",
+			"type": "dezog",
 			"request": "launch",
-			"zhostname": "localhost",
-			"zport": 10000,
+			"remoteType": "zrcp",
+			"zrcp": {
+				"hostname": "localhost",
+				"port": 10000
+			},
 			"topOfStack": "Stack_Top",
 			"rootFolder": "${fileDirname}",
 			"listFiles": [
 				{
 					"path": "${fileDirname}/${fileBasenameNoExtension}.lst",
-					"useFiles": true,
 					"asm": "sjasmplus",
-					"mainFile": "${fileDirname}/${fileBasenameNoExtension}.z80"
+					"useFiles": true,
+					"mainFile": "${fileDirname}/${fileBasenameNoExtension}.z80",
+					"srcDirs": [ "lib" ]
 				}
 			],
 			"disassemblerArgs": {
@@ -25,7 +29,7 @@
 			},
 			"load": "${fileDirname}/${fileBasenameNoExtension}.sna",
 			"skipInterrupt": false,
-			"startAutomatically": false,
+			"startAutomatically": true,
 			"preLaunchTask": "sjasmplus"
 		}
 	]
