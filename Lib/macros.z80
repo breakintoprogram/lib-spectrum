@@ -2,12 +2,27 @@
 ; Title:        Macros
 ; Author:       Dean Belfield
 ; Created:	06/02/2020
-; Last updated: 06/02/2020
+; Last updated: 05/04/2020
 ;
 ; Requires:	
 ;
 ; Modinfo:
 ;
+; 05/04/2020:	Local labels now used in macros. Added MIN and MAX
+
+MIN:			MACRO P1			; Get min of P1 and A in A
+			CP P1				; Compare A with P1
+			JR C, .S1			; Skip if P1 > A
+			LD A, P1			; Assign P1 to A
+.S1			;
+			ENDM
+
+MAX:			MACRO P1			; Get max of P1 and A in A
+			CP P1				; Compare A with P1
+			JR NC, .S1			; Skip if P1 > A
+			LD A, P1			; Assign P1 to A
+.S1			;
+			ENDM
 
 LD_BC_A:		MACRO 
 			LD C, A 			; Turn A into 16 bit number 
@@ -33,29 +48,32 @@ LD_HL_A:		MACRO
 ADD_HL_A:		MACRO 
 			ADD A, L
 			LD L,A 
-			JR NC, $+3
+			JR NC, .S1
 			INC H 	
+.S1			;			
 			ENDM 
 
 ADD_DE_A:		MACRO 
 			ADD A, E 
 			LD E, A 
-			JR NC, $+3
+			JR NC, .S1
 			INC D 
+.S1			;
 			ENDM
 
 ADD_BC_A:		MACRO
 			ADD A,C 
 			LD C, A 
-			JR NC, $+3
+			JR NC, .S1
 			INC B 
+.S1			;
 			ENDM 
 
 ADD_BC_A_SIGNED:	MACRO
 			OR A 
-			JP P, $+4
+			JP P,.S1
 			DEC B
-			ADD A, C  
+.S1			ADD A, C  
 			LD C, A 
 			ADC A, B 
 			SUB C 
@@ -64,9 +82,9 @@ ADD_BC_A_SIGNED:	MACRO
 
 ADD_DE_A_SIGNED:	MACRO
 			OR A 
-			JP P, $+4
+			JP P, .S1
 			DEC D
-			ADD A, E 
+.S1			ADD A, E 
 			LD E, A 
 			ADC A, D 
 			SUB E 
@@ -75,9 +93,9 @@ ADD_DE_A_SIGNED:	MACRO
 
 ADD_HL_A_SIGNED:	MACRO
 			OR A 
-			JP P, $+4
+			JP P, .S1
 			DEC H
-			ADD A, L  
+.S1			ADD A, L  
 			LD L, A 
 			ADC A, H 
 			SUB L 
