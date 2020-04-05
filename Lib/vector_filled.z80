@@ -4,12 +4,13 @@
 ; Created:	01/04/2020
 ; Last Updated:	01/04/2020
 ;
-; Requires:	output.asm
+; Requires:	output, macro
 ;
 ; Modinfo:
 ;
 ; 05/04/2020:	Improved code to determine which table to draw into
 ;		Added Draw_Quad_Filled
+;		Added Draw_Circle_Filled
 
 ; EQUS
 ;
@@ -18,12 +19,33 @@ Vector_Table_X2		EQU Vector_Table_X1+0x100	; next to each other
 
 ; Macros
 ;
+
+; Shortcut to draw a line between two points
+;
 DRAW_LINE_TABLE:	MACRO	PX1,PY1,PX2,PY2
 			LD C,(IY+PX1)
 			LD B,(IY+PY1)
 			LD E,(IY+PX2)
 			LD D,(IY+PY2)
 			CALL Draw_Line_Table
+			ENDM
+
+; Shortcut to plot a circle quadrant
+;
+PLOT_CIRCLE_TABLE:	MACRO	TABLE, OPX, OPY
+			LD H,high TABLE
+			LD A,B 				; Get the Y origin
+			OPY IXH				; Add the Y coordinate
+			LD L,A				; Store in L
+			LD A,C 				; Get the X coordinate
+			OPX IXL				; Add the X origin
+			LD (HL), A			; Store in the table
+			LD A,B				; Repeat the second quadrant
+			OPY IXL
+			LD L,A 
+			LD A,C
+			OPX IXH
+			LD (HL),A
 			ENDM
 
 ; Get the absolute distance between two points
@@ -40,7 +62,32 @@ ABS_DELTA:		MACRO	P1,P2,REG
 ; IY: Pointer to 2 coordinates and 1 radius
 ; HL: 8-Byte texture address
 ;
-Draw_Circle_Filled:	RET
+
+; Draw a filled circle
+; HL: 8-Byte texture address
+; B = Y pixel position of circle centre
+; C = X pixel position of circle centre
+; A = Radius of circle
+;
+Draw_Circle_Filled:	LD (Draw_Vector_Table_1+1), HL
+			PUSH AF
+			CALL Draw_Circle_Table
+			POP AF				; A = radius
+			EXX				; BC' = YX origin
+			LD C,A				; C = radius
+			LD A, B				; Get the origin
+			SUB C				; Subtract the radius
+			JR NC, 1F			; Skip next bit if OK
+			XOR A				; Set to zero if off top of screen
+1:			LD L,A 				; Store in L
+			LD A,B				; Get the origin
+			ADD C				; Add the radius
+			SUB L 				; Subtract the top
+			CP 192 				; Check bottom screen boundary
+			JR C, 2F
+			LD A,191
+2:			LD B,A				; Store in B
+			JP Draw_Vector_Table		; Draw the table
 
 ; Draw a filled polygon
 ; IY: Pointer to 8 bytes worth of coordinate data
@@ -204,6 +251,77 @@ Draw_Line_Table_Q2_M2:	INC D				; Increment or decrement the X coordinate (self-
 			LD (HL),D
 			RET
 
+; Draw a circle in the table
+; B = Y pixel position of circle centre
+; C = X pixel position of circle centre
+; A = Radius of circle
+;
+Draw_Circle_Table:	AND A				
+			RET Z 
+
+			PUSH BC 			; Get BC in BC'
+			EXX 
+			POP BC 
+
+			LD IXH,A			; IXH = Y
+			LD IXL,0			; IXL = X
+;
+; Calculate BC (D2) = 3-(R*2)
+;
+			LD H,0				; HL = R
+			LD L,A
+			ADD HL,HL			; HL = R*2
+			EX DE,HL			; DE = R*2
+			LD HL,3
+			AND A
+			SBC HL,DE			; HL = 3-(R*2)
+			LD B,H
+			LD C,L
+;
+; Calculate HL (Delta) = 1-R
+;
+			LD HL,1
+			LD D,0
+			LD E,IXL
+			AND A
+			SBC HL,DE			; HL = 1 - CR
+;
+; SET DE (D1) = 1
+;
+			LD DE,1
+;
+; The circle loop
+; First plot all the octants
+; B' = Y origin
+; C' = X origin
+;
+0:			EXX				; Plot the circle quadrants
+			PLOT_CIRCLE_TABLE Vector_Table_X1, ADD, ADD
+			PLOT_CIRCLE_TABLE Vector_Table_X2, SUB, ADD
+			PLOT_CIRCLE_TABLE Vector_Table_X1, ADD, SUB
+			PLOT_CIRCLE_TABLE Vector_Table_X2, SUB, SUB
+			EXX
+;
+; Now calculate the next point
+;
+			LD A,IXH			; Get Y in A
+			CP IXL				; Compare with X
+			RET C				; Return if X>Y
+			BIT 7,H				; Check for Hl<=0
+			JR Z,1F
+			ADD HL,DE			; Delta=Delta+D1
+			JR 2F 
+1:			ADD HL,BC			; Delta=Delta+D2
+			INC BC
+			INC BC				; D2=D2+2
+			DEC IXH				; Y=Y-1
+2:			INC BC				; D2=D2+2
+			INC BC
+			INC DE				; D1=D1+2
+			INC DE	
+			INC IXL				; X=X+1
+			JR 0B
+
 ; Draw Horizontal Line routine
 ; B = Y coordinate
 ; C = X pixel position 1
@@ -284,6 +402,7 @@ Plot_Line_RHS:		DB %10000000,%11000000,%11100000,%11110000,%11111000,%11111100,%
 
 ; Some sample textures
 ;
+Vector_Texture_00:	DB %11111111,%11111111,%11111111,%11111111,%11111111,%11111111,%11111111,%11111111
 Vector_Texture_01:	DB %10101010,%01010101,%10101010,%01010101,%10101010,%01010101,%10101010,%01010101
 Vector_Texture_02:	DB %10000001,%01000010,%00100100,%00011000,%00011000,%00100100,%01000010,%10000001
 Vector_Texture_03:	DB %10001000,%01000100,%00100010,%00010001,%10001000,%01000100,%00100010,%00010001
