@@ -8,6 +8,8 @@
 ;
 ; Modinfo:
 ;
+; 05/04/2020:	Improved code to determine which table to draw into
+;		Added Draw_Quad_Filled
 
 ; EQUS
 ;
@@ -16,8 +18,7 @@ Vector_Table_X2		EQU Vector_Table_X1+0x100	; next to each other
 
 ; Macros
 ;
-VT_LINE:		MACRO	TABLE,PX1,PY1,PX2,PY2
-			LD HL,TABLE
+DRAW_LINE_TABLE:	MACRO	PX1,PY1,PX2,PY2
 			LD C,(IY+PX1)
 			LD B,(IY+PY1)
 			LD E,(IY+PX2)
@@ -30,81 +31,59 @@ VT_LINE:		MACRO	TABLE,PX1,PY1,PX2,PY2
 ABS_DELTA:		MACRO	P1,P2,REG
 			LD A,P2
 			SUB P1
-			JR NC, $+4
+			JR NC, .S1
 			NEG
-			LD REG, A
+.S1			LD REG, A
 			ENDM
 
+; Draw a filled circle
+; IY: Pointer to 2 coordinates and 1 radius
+; HL: 8-Byte texture address
+;
+Draw_Circle_Filled:	RET
+
+; Draw a filled polygon
+; IY: Pointer to 8 bytes worth of coordinate data
+; HL: 8-Byte texture address
+;
+Draw_Quad_Filled:	LD (Draw_Vector_Table_1+1), HL	; Store the texture address (8 bytes)
+			DRAW_LINE_TABLE 0,1,2,3
+			DRAW_LINE_TABLE 2,3,4,5
+			DRAW_LINE_TABLE 4,5,6,7
+			DRAW_LINE_TABLE 6,7,0,1
+			LD A,(IY+1)			; Get the min Y
+			MIN  (IY+3)
+			MIN  (IY+5)
+			MIN  (IY+7)
+			LD L,A				; Store in L
+			LD A,(IY+1)			; Get the max Y
+			MAX  (IY+3)
+			MAX  (IY+5)
+			MAX  (IY+7)
+			SUB L				; Subtract from L (the min)
+			LD B,A				; Get the height
+			JP NZ, Draw_Vector_Table	; Only draw if not zero
+			RET
+
 ; Draw a filled triangle
-; IY: Pointer to 3 bytes worth of coordinate data
+; IY: Pointer to 6 bytes worth of coordinate data
 ; HL: 8-Byte texture address
 ;
 Draw_Triangle_Filled:	LD (Draw_Vector_Table_1+1),HL	; Store the texture address (8 bytes)
-;
-; Get the thre side heights in B, C and D so we can determine which is longest
-;
-			ABS_DELTA (IY+1), (IY+3), B	; Side 1
-			ABS_DELTA (IY+3), (IY+5), C	; Side 2
-			ABS_DELTA (IY+5), (IY+1), D	; Side 3
-;
-; Now work out which line is longest, and draw that in Vector_Table_X1. The other
-; two shorter lines will be drawn in Vector_Table_X2
-; First start by comparing Side 1 with Side 2 and Side 3
-;
-			LD A,C 				; Get Side 2
-			CP B 				; Compare with Side 1
-			JR C, 1F			; Skip if Side 1 is greater
-			CP D				; Compare with Side 3
-			JR C, 1F			; Skip if Side 3 is greater	
-;
-; Side 2 is the longest
-;
-			VT_LINE Vector_Table_X2,0,1,2,3	; Side 1
-			VT_LINE Vector_Table_X1,2,3,4,5	; Side 2
-			VT_LINE Vector_Table_X2,4,5,0,1	; Side 3
-			LD L, (IY + 3)			; L and A contain the Y points
-			LD A, (IY + 5)			; of the longest line
-			JR 3F 
+			DRAW_LINE_TABLE 0,1,2,3		; Side 1
+			DRAW_LINE_TABLE 2,3,4,5		; Side 2
+			DRAW_LINE_TABLE 4,5,0,1		; Side 3
+			LD A,(IY+1)			; Get the min Y
+			MIN  (IY+3)
+			MIN  (IY+5)
+			LD L,A				; Store in L
+			LD A,(IY+1)			; Get the max Y
+			MAX  (IY+3)
+			MAX  (IY+5)
+			SUB L				; Subtract from L (the min)
+			LD B,A				; Get the height
+			RET Z				; Don't draw if zero
 
-;
-; Now check to see which of Side 1 or Side 3 is the longest
-;
-1:			LD A,B 				; Get Side 1
-			CP D 				; Compare with Side 3
-			JR C, 2F			; Skip if Side 3 is greater
-;
-; Side 1 is the longest
-;
-
-			VT_LINE Vector_Table_X1,0,1,2,3	; Side 1
-			VT_LINE Vector_Table_X2,2,3,4,5	; Side 2
-			VT_LINE Vector_Table_X2,4,5,0,1	; Side 3
-			LD L, (IY + 1)			; L and A contain the Y points
-			LD A, (IY + 3)			; of the longest line
-			JR 3F 
-;
-; Side 3 is the longest
-;
-2:
-			VT_LINE Vector_Table_X2,0,1,2,3	; Side 1
-			VT_LINE Vector_Table_X2,2,3,4,5	; Side 2
-			VT_LINE Vector_Table_X1,4,5,0,1	; Side 3
-			LD L, (IY + 5)			; L and A contain the Y points
-			LD A, (IY + 1)			; of the longest line
-;
-; Calculate the top of the triangle
-; L: The top of the triangle
-; A: The bottom of the triangle
-;
-3:			CP L				; Compare top with bottom
-			JR NC, 4F			; Skip if bottom is greater than top
-			LD H,A       			; Swap A and L
-			LD A,L				; using H as a scratchpad register
-			LD L,H
-4:			SUB L 				; Subtract the bottom from the top to get the
-			LD B,A 				; height in B
-
-			RET Z				; Ret if Z - would loop 256 times
 ;
 ; Draw the contents of the vector tables
 ; L: Start Y position
@@ -128,17 +107,17 @@ Draw_Vector_Table_1:	LD HL,0				; adding to the texture address, which has been 
 			RET 
 
 ; Draw a line into the vector table
-; HL = Vector Table
 ; B = Y pixel position 1
 ; C = X pixel position 1
 ; D = Y pixel position 2
 ; E = X pixel position 2
 ;
-Draw_Line_Table:	LD A,D				; Check whether we are going to be drawing up
+Draw_Line_Table:	LD H, high Vector_Table_X1	; Default to drawing in this table
+			LD A,D				; Check whether we are going to be drawing up
 			CP B
 			JR NC, 3F
-
-			PUSH BC				; If we are, then this neat trick swaps BC and DE
+			INC H				; If we're drawing up, then draw in second table
+			PUSH BC				; And use this neat trick to swaps BC and DE
 			PUSH DE				; using the stack, forcing the line to be always
 			POP BC				; drawn downwards
 			POP DE
@@ -307,3 +286,4 @@ Plot_Line_RHS:		DB %10000000,%11000000,%11100000,%11110000,%11111000,%11111100,%
 ;
 Vector_Texture_01:	DB %10101010,%01010101,%10101010,%01010101,%10101010,%01010101,%10101010,%01010101
 Vector_Texture_02:	DB %10000001,%01000010,%00100100,%00011000,%00011000,%00100100,%01000010,%10000001
+Vector_Texture_03:	DB %10001000,%01000100,%00100010,%00010001,%10001000,%01000100,%00100010,%00010001
