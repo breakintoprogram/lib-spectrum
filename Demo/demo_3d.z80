@@ -12,11 +12,36 @@
 			DEVICE ZXSPECTRUM48			; sjasmplus directive for SAVESNA at end
 
 Stack_Top:		EQU 0xFFF0
-Code_Start:		EQU 0x8000
+Code_Start:		EQU 0x7FFD				
 
 			ORG Code_Start
 
 			JP Main
+
+SIN_TABLE:		LUA ALLPASS
+			for i = 0, 255 do
+				s = math.sin(i/128*math.pi)
+				t = s > 0 and 1 or s < 0 and -1 or 0
+				s = 2 * math.floor(math.abs(s)*128)
+				if t == -1 then s = s + 1 end
+				if s >= 256 then s = 255 end
+				_pc(string.format("DB %d", s))
+			end
+			ENDLUA
+
+			DEFINE SCREEN_BUFFER 0xE000		; Plot / draw to off-screen buffer
+
+SHAPE_BUFFER:		DS 256					; This should be aligned on a byte boundary
+POINT_BUFFER:		DS 16
+POLYGON_BUFFER:		DS 8,0
+SD:			EQU 256
+YC:			DW 0 
+XC:			DW 0
+ZC:			DW 256
+PHI:			DB 0
+THE:			DB 0
+PSI:			DB 0
+Debounce_Key:		DB 0xFF
 
 			include "../lib/macros.z80"
 			include "../lib/vector.z80"
@@ -30,8 +55,10 @@ Code_Start:		EQU 0x8000
 
 Main:			DI
 			LD SP,Stack_Top
-			LD A,38h
+			LD A,46h
 			CALL Clear_Screen
+			LD A,0
+			OUT (254),A
 			LD HL,Interrupt
 			LD IX,0xFFF0
 			LD (IX+04h),0xC3          		 ; Opcode for JP
@@ -44,32 +71,26 @@ Main:			DI
 			IM 2
 			EI
 	
-LOOP:			HALT
+LOOP:			DI
+			LD HL,SCREEN_BUFFER
+			CALL Clear_Screen_Fast
+			LD HL,Vector_Texture_03
+			LD B,150
+			LD C,88
+			LD A,55
+			CALL Draw_Circle_Filled
+			LD IX,Cube
+			CALL Translate
+			CALL Draw_Shape
+			LD HL,SCREEN_BUFFER
+			CALL Copy_Screen
+			EI
+
+			LD A,(THE): ADD A,3: LD (THE),A
+			LD A,(PSI): ADD A,1: LD (PSI),A
+			LD A,(PHI): ADD A,2: LD (PHI),A
+
 			JR LOOP
-
-; Draw cross, offset 7 pixels so centre is at pixel coord
-;
-Draw_Cross:		LD A,C
-			SUB 7
-			LD C,A
-			LD A,B
-			SUB 7
-			LD B,A
-			LD DE,Sprite_Cross
-			JP Render_Sprite
-
-; Clear cross, offset 7 pixels so centre is at pixel coord
-;
-Clear_Cross:		LD A,C
-			SUB 7
-			LD C,A
-			LD A,B
-			SUB 7
-			LD B,A
-			JP Clear_Sprite
-
-Debounce_Key:		DB 0xFF
-Position:		DW 0x5070,0x6080,0x7060
 
 ; Handle user input
 ;
@@ -77,33 +98,9 @@ User_Interface:		CALL Read_Keyboard			; Read the keyboard
 			PUSH AF					; Stack the keypress
 			JR Z,User_Interface_End			; No keys pressed; jump to end
 
-			LD DE,(Position + 0)			; Get the cross position)
-			CP "Q"
-			JR NZ, $+3				; Saves lots of labels; skips 3 bytes (the JR and the DEC)
-			DEC D
-			CP "A"
-			JR NZ, $+3
-			INC D
-			CP "O"
-			JR NZ, $+3
-			DEC E
-			CP "P"
-			JR NZ, $+3
-			INC E
-			LD (Position + 0),DE			; Store the new cross position
-
 			LD HL,Debounce_Key			; Check whether we've pressed this key before
 			CP (HL)				
 			JR Z,User_Interface_End			; Yes we have, so skip the debounced keys
-
-			CP " "					; If space pressed, then rotate the cross positions
-			JR NZ,User_Interface_End
-			LD HL,(Position + 0)
-			LD DE,(Position + 2)
-			LD BC,(Position + 4)
-			LD (Position + 2),HL
-			LD (Position + 4),DE
-			LD (Position + 0),BC
 
 User_Interface_End:	POP AF					; Unstack the keypress
 			LD (Debounce_Key),A			; Store for debounce 
@@ -129,51 +126,7 @@ Interrupt:		DI
 			AND A
 			JR Z,Interrupt_End
 
-;			LD A,2
-;			OUT (254),A
-			CALL Clear_Screen_Fast
-;			LD A,3
-;			OUT (254),A
-			LD BC,(Position + 0)
-			CALL Draw_Cross
-;			LD A,4
-;			OUT (254),A
-			LD HL,Vector_Texture_01
-			LD IY,Position
-			CALL Draw_Triangle_Filled
-;			LD A,5
-;			OUT (254),A
-
-;			LD A,(Position + 2)
-;			LD H,A
-;			LD A,(Position + 0)
-;			SUB H
-;			JR NC,$+3
-;			NEG
-;			LD H,A
-;			LD L,A
-;			CALL MULTIPLY
-;			PUSH HL
-;			LD A,(Position + 3)
-;			LD H,A
-;			LD A,(Position + 1)
-;			SUB H
-;			JR NC,$+3
-;			NEG
-;			LD H,A
-;			LD L,A
-;			CALL MULTIPLY
-;			POP DE
-;			ADD HL,DE
-;			CALL SQRT
-;			LD BC,(Position + 2)
-;			CALL Draw_Circle
-;			LD A,6
-;			OUT (254),A
-
 Interrupt_End:		CALL User_Interface
-			LD A,7
-			OUT (254),A
 
 			POP IY
 			POP HL
@@ -190,143 +143,288 @@ Interrupt_End:		CALL User_Interface
 			EI
 			RET
 
-Sprite_Cross:		DW Sprite_Cross_0,Sprite_Cross_1,Sprite_Cross_2,Sprite_Cross_3,Sprite_Cross_4,Sprite_Cross_5,Sprite_Cross_6,Sprite_Cross_7
+; Render the shape
+; IX: Coordinate data
+;
+Draw_Shape:		LD IY,POINT_BUFFER
+			LD B,(IX+1)
+1:			LD DE,POINT_BUFFER
+			PUSH BC	
+			LD A,(IX+2)
+			ADD A,A
+			ADD A,A 
+			LD H,high SHAPE_BUFFER
+			LD L,A
+			LDI 
+			LDI 
+			LDI 
+			LDI 
+			LD A,(IX+3)
+			ADD A,A
+			ADD A,A 
+			LD H,high SHAPE_BUFFER
+			LD L,A
+			LDI 
+			LDI 
+			LDI 
+			LDI 
+			LD A,(IX+4)
+			ADD A,A
+			ADD A,A 
+			LD H,high SHAPE_BUFFER
+			LD L,A
+			LDI 
+			LDI 
+			LDI 
+			LDI 
+			LD A,(IX+5)
+			ADD A,A
+			ADD A,A 
+			LD H,high SHAPE_BUFFER
+			LD L,A
+			LDI 
+			LDI 
+			LDI 
+			LDI 
+			CALL Backface_Cull
+			LD L,(IX+6)
+			LD H,(IX+7)
+			CALL NZ,Draw_Polygon
+			LD BC,6 
+			ADD IX,BC 
+			POP BC
+			DJNZ 1B
+			RET 
 
-Sprite_Cross_0:		DB %00000001,%00000000,%00000000
-			DB %00000001,%00000000,%00000000
-			DB %00000001,%00000000,%00000000
-			DB %00000001,%00000000,%00000000
-			DB %00000001,%00000000,%00000000
-			DB %00000001,%00000000,%00000000
-			DB %00000000,%00000000,%00000000
-			DB %11111100,%01111110,%00000000
-			DB %00000000,%00000000,%00000000
-			DB %00000001,%00000000,%00000000
-			DB %00000001,%00000000,%00000000
-			DB %00000001,%00000000,%00000000
-			DB %00000001,%00000000,%00000000
-			DB %00000001,%00000000,%00000000
-			DB %00000001,%00000000,%00000000
-			DB %00000000,%00000000,%00000000
+; Draw a polygon
+;
+Draw_Polygon:		LD A,(IY+0): LD (POLYGON_BUFFER+0),A
+			LD A,(IY+2): LD (POLYGON_BUFFER+1),A
+			LD A,(IY+4): LD (POLYGON_BUFFER+2),A
+			LD A,(IY+6): LD (POLYGON_BUFFER+3),A
+			LD A,(IY+8): LD (POLYGON_BUFFER+4),A
+			LD A,(IY+10): LD (POLYGON_BUFFER+5),A
+			LD A,(IY+12): LD (POLYGON_BUFFER+6),A
+			LD A,(IY+14): LD (POLYGON_BUFFER+7),A
+			PUSH IX 
+			PUSH IY
+			LD IY,POLYGON_BUFFER
+			CALL Draw_Quad_Filled
+			POP IY
+			POP IX
+			RET
+; Translate
+; IX: Coordinate data
+;
+Translate:		LD B,(IX+0)
+			XOR A
+			LD (DIVISOR+2),A
+			LD IY,SHAPE_BUFFER
+0:			PUSH BC 
+			LD E,(IX+3)
+			LD D,(IX+2)
+			LD A,(PHI)
+			CALL Trig_Rotate
+			LD E,A 
+			EX AF,AF 
+			PUSH AF 
+			LD D,(IX+1) 
+			LD A,(THE) 
+			CALL Trig_Rotate 
+			LD HL,(ZC)
+			CP 128 
+			CCF 
+			LD E,A
+			SBC A,A 
+			LD D,A 
+			SBC HL,DE 
+			LD (DIVISOR),HL 
+			EX AF,AF 
+			LD D,A 
+			POP AF 
+			LD E,A 
+			LD A,(PSI) 
+			CALL Trig_Rotate 
+			EX AF,AF 
+			PUSH AF 
+			EX AF,AF 
 
-Sprite_Cross_1:		DB %00000000,%10000000,%00000000
-			DB %00000000,%10000000,%00000000
-			DB %00000000,%10000000,%00000000
-			DB %00000000,%10000000,%00000000
-			DB %00000000,%10000000,%00000000
-			DB %00000000,%10000000,%00000000
-			DB %00000000,%00000000,%00000000
-			DB %01111110,%00111111,%00000000
-			DB %00000000,%00000000,%00000000
-			DB %00000000,%10000000,%00000000
-			DB %00000000,%10000000,%00000000
-			DB %00000000,%10000000,%00000000
-			DB %00000000,%10000000,%00000000
-			DB %00000000,%10000000,%00000000
-			DB %00000000,%10000000,%00000000
-			DB %00000000,%00000000,%00000000
+			LD HL,(YC) 
+			CALL Perspective
+			LD DE,96
+			ADD HL,DE
+			LD (IY+2),L 
+			LD (IY+3),H 
+			POP AF
+			LD HL,(XC) 
+			CALL Perspective
+			LD DE,128
+			ADD HL,DE 
+			LD (IY+0),L
+			LD (IY+1),H 
 
-Sprite_Cross_2:		DB %00000000,%01000000,%00000000
-			DB %00000000,%01000000,%00000000
-			DB %00000000,%01000000,%00000000
-			DB %00000000,%01000000,%00000000
-			DB %00000000,%01000000,%00000000
-			DB %00000000,%01000000,%00000000
-			DB %00000000,%00000000,%00000000
-			DB %00111111,%00011111,%10000000
-			DB %00000000,%00000000,%00000000
-			DB %00000000,%01000000,%00000000
-			DB %00000000,%01000000,%00000000
-			DB %00000000,%01000000,%00000000
-			DB %00000000,%01000000,%00000000
-			DB %00000000,%01000000,%00000000
-			DB %00000000,%01000000,%00000000
-			DB %00000000,%00000000,%00000000
+			LD BC,3
+			ADD IX,BC 
+			INC BC 
+			ADD IY,BC
+			POP BC 
+			DJNZ 0B
+			RET
+		
+Perspective:		CP 128 
+			CCF 
+			LD E,A 
+			SBC A,A 
+			LD D,A 
+			ADD HL,DE 
+			EX DE,HL
+			BIT 7,D 
+			JR Z,1F
+			XOR A
+			LD H,A 
+			LD L,A 
+			SBC HL,DE 
+			EX DE,HL 
+			LD BC,SD 
+			CALL MUL24 
+			LD (DIVIDEND+2),A 
+			LD (DIVIDEND),HL
+			CALL DIV24 
+			EX DE,HL 
+			LD HL,65535
+			AND A 
+			SBC HL,DE 
+			CPL 
+			LD DE,1
+			ADD HL,DE 
+			ADC A,0 
+			RET 
+1:			LD BC,SD 
+			CALL MUL24 
+			LD (DIVIDEND+2),A 
+			LD (DIVIDEND),HL 
+			JP DIV24 
 
-Sprite_Cross_3:		DB %00000000,%00100000,%00000000
-			DB %00000000,%00100000,%00000000
-			DB %00000000,%00100000,%00000000
-			DB %00000000,%00100000,%00000000
-			DB %00000000,%00100000,%00000000
-			DB %00000000,%00100000,%00000000
-			DB %00000000,%00000000,%00000000
-			DB %00011111,%10001111,%11000000
-			DB %00000000,%00000000,%00000000
-			DB %00000000,%00100000,%00000000
-			DB %00000000,%00100000,%00000000
-			DB %00000000,%00100000,%00000000
-			DB %00000000,%00100000,%00000000
-			DB %00000000,%00100000,%00000000
-			DB %00000000,%00100000,%00000000
-			DB %00000000,%00000000,%00000000
+Backface_Cull:		LD BC,(POINT_BUFFER)
+			LD HL,(POINT_BUFFER+6)
+			LD DE,(POINT_BUFFER+10)
+			CALL 1F
+			PUSH AF 
+			PUSH HL 
+			LD BC,(POINT_BUFFER+4)
+			LD HL,(POINT_BUFFER+10)
+			LD DE,(POINT_BUFFER+2)
+			CALL 1F 
+			POP DE 
+			POP BC 
+			ADD HL,DE 
+			ADC A,B 
+			PUSH AF 
+			PUSH HL 
+			LD BC,(POINT_BUFFER+8)
+			LD HL,(POINT_BUFFER+2)
+			LD DE,(POINT_BUFFER+6)
+			CALL 1F
+			POP DE
+			POP BC 
+			ADD HL,DE
+			ADC A,B 
+			BIT 7,A 
+			RET 
+1:			OR A 
+			SBC HL,DE 
+			EX DE,HL 
+			JP M,2F
+			BIT 7,B 
+			JP Z,MUL24 
+			XOR A 
+			LD H,A 
+			LD L,A 
+			SBC HL,BC 
+			LD B,H 
+			LD C,L 
+			JP MUL24_NEG 
+2:			XOR A 
+			LD H,A 
+			LD L,A 
+			SBC HL,DE 
+			EX DE,HL 
+			BIT 7,B 
+			JP Z,MUL24_NEG 
+			XOR A
+			LD H,A 
+			LD L,A 
+			SBC HL,BC 
+			LD B,H 
+			LD C,L 
+			JP MUL24 
 
-Sprite_Cross_4:		DB %00000000,%00010000,%00000000
-			DB %00000000,%00010000,%00000000
-			DB %00000000,%00010000,%00000000
-			DB %00000000,%00010000,%00000000
-			DB %00000000,%00010000,%00000000
-			DB %00000000,%00010000,%00000000
-			DB %00000000,%00000000,%00000000
-			DB %00001111,%11000111,%11100000
-			DB %00000000,%00000000,%00000000
-			DB %00000000,%00010000,%00000000
-			DB %00000000,%00010000,%00000000
-			DB %00000000,%00010000,%00000000
-			DB %00000000,%00010000,%00000000
-			DB %00000000,%00010000,%00000000
-			DB %00000000,%00010000,%00000000
-			DB %00000000,%00000000,%00000000
+; Trig rotation
+; A =COS(D)+SIN(E)
+; A'=COS(D)-SIN(E)
+;
+Trig_Rotate:		PUSH DE 
+			LD (Trig_Rotate1+1),A 
+			LD C,E 
+			CALL SIN 
+			LD E,A 
+Trig_Rotate1:		LD A,0
+			LD C,D 
+			CALL COS 
+			SUB E 
+			EX AF,AF 
+			POP DE 
+			LD A,(Trig_Rotate1+1) 
+			LD C,E 
+			CALL COS 
+			LD E,A 
+			LD A,(Trig_Rotate1+1) 
+			LD C,D 
+			CALL SIN 
+			ADD A,E 
+			RET 
 
-Sprite_Cross_5:		DB %00000000,%00001000,%00000000
-			DB %00000000,%00001000,%00000000
-			DB %00000000,%00001000,%00000000
-			DB %00000000,%00001000,%00000000
-			DB %00000000,%00001000,%00000000
-			DB %00000000,%00001000,%00000000
-			DB %00000000,%00000000,%00000000
-			DB %00000111,%11100011,%11110000
-			DB %00000000,%00000000,%00000000
-			DB %00000000,%00001000,%00000000
-			DB %00000000,%00001000,%00000000
-			DB %00000000,%00001000,%00000000
-			DB %00000000,%00001000,%00000000
-			DB %00000000,%00001000,%00000000
-			DB %00000000,%00001000,%00000000
-			DB %00000000,%00000000,%00000000
+; Basic trig functions
+; A=TRIG(A)*C
+; 
+COS:			ADD A,64
+SIN:			LD H,high SIN_TABLE
+			BIT 7,A 
+			JR NZ,1F 
+			LD L,A
+			LD B,(HL)
+			LD A,C 
+			AND A 
+			JP P,MUL8_DIV256 
+			NEG 
+			LD C,A 
+			JP MUL8_DIV256_NEG 
+1:			AND 127
+			LD L,A 
+			LD B,(HL) 
+			LD A,C 
+			AND A 
+			JP P,MUL8_DIV256_NEG 
+			NEG 
+			LD C,A 
+			JP MUL8_DIV256 
 
-Sprite_Cross_6:		DB %00000000,%00000100,%00000000
-			DB %00000000,%00000100,%00000000
-			DB %00000000,%00000100,%00000000
-			DB %00000000,%00000100,%00000000
-			DB %00000000,%00000100,%00000000
-			DB %00000000,%00000100,%00000000
-			DB %00000000,%00000000,%00000000
-			DB %00000011,%11110001,%11111000
-			DB %00000000,%00000000,%00000000
-			DB %00000000,%00000100,%00000000
-			DB %00000000,%00000100,%00000000
-			DB %00000000,%00000100,%00000000
-			DB %00000000,%00000100,%00000000
-			DB %00000000,%00000100,%00000000
-			DB %00000000,%00000100,%00000000
-			DB %00000000,%00000000,%00000000
-
-Sprite_Cross_7:		DB %00000000,%00000010,%00000000
-			DB %00000000,%00000010,%00000000
-			DB %00000000,%00000010,%00000000
-			DB %00000000,%00000010,%00000000
-			DB %00000000,%00000010,%00000000
-			DB %00000000,%00000010,%00000000
-			DB %00000000,%00000000,%00000000
-			DB %00000001,%11111000,%11111100
-			DB %00000000,%00000000,%00000000
-			DB %00000000,%00000010,%00000000
-			DB %00000000,%00000010,%00000000
-			DB %00000000,%00000010,%00000000
-			DB %00000000,%00000010,%00000000
-			DB %00000000,%00000010,%00000000
-			DB %00000000,%00000010,%00000000
-			DB %00000000,%00000000,%00000000
+Cube:			DB 8
+			DB -40,40,40
+			DB 40,40,40
+			DB 40,-40,40
+			DB -40,-40,40
+			DB -40,40,-40
+			DB 40,40,-40
+			DB 40,-40,-40
+			DB -40,-40,-40
+			DB 6
+			DB 0,1,2,3: DW Vector_Texture_00
+			DB 0,4,5,1: DW Vector_Texture_01
+			DB 7,6,5,4: DW Vector_Texture_02
+			DB 3,2,6,7: DW Vector_Texture_03
+			DB 1,5,6,2: DW Vector_Texture_00
+			DB 0,3,7,4: DW Vector_Texture_01
 
 Code_Length:		EQU $-Code_Start+1
 
