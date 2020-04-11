@@ -34,10 +34,10 @@ MAIN:			DI
 			CALL Initialise_Sprites
 			LD HL,Interrupt
 			LD IX,0xFFF0
-			LD (IX+04h),0xC3         		   ; Opcode for JP
+			LD (IX+04h),0xC3            ; Opcode for JP
 			LD (IX+05h),L
 			LD (IX+06h),H
-			LD (IX+0Fh),0x18        		    ; Opcode for JR; this will do JR to FFF4h
+			LD (IX+0Fh),0x18            ; Opcode for JR; this will do JR to FFF4h
 			LD A,0x39
 			LD I,A
 			IM 2
@@ -49,7 +49,7 @@ LOOP:			HALT
 
 Initialise_Sprites:	LD IX,Sprite_Data
 			LD B,Sprite_Max
-Initialise_Sprites_1:	CALL RND16
+Initialise_Sprites_1:	CALL Rand16
 			LD A,H
 			AND 0x7F
 			ADD A,16
