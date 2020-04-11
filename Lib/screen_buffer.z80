@@ -2,7 +2,7 @@
 ; Title:	ZX Spectrum Screen Buffer Routines
 ; Author:	Dean Belfield
 ; Created:	20/08/2011
-; Last Updated:	10/04/2020
+; Last Updated:	11/04/2020
 ;
 ; Requires:
 ;
@@ -12,6 +12,7 @@
 ; 08/02/2020:	Moved Clear_Screen to output.z80
 ; 10/04/2020:	Added Get_Pixel_Address_B
 ;		Fixed Copy_Screen to copy entire screen width, not just half a screen
+; 11/04/2020:	Get_Pixel_Address_B now only compiled if SCREEN_BUFFER is declared
 ;
 
 ; Get screen address (based upon a 32x192 byte buffer where each pixel row is 32 bytes below the previous)
@@ -20,6 +21,7 @@
 ; C = X pixel position
 ; Returns address in HL and pixel position within character in A
 ;
+			IFDEF SCREEN_BUFFER
 Get_Pixel_Address_B:	LD L,B				; Calculate Y2,Y1,Y0
 			LD H,0
 			DUP 5
@@ -38,6 +40,7 @@ Get_Pixel_Address_B:	LD L,B				; Calculate Y2,Y1,Y0
 			LD A,C
 			AND 7
 			RET
+			ENDIF
 
 ; Fast clear-screen routine
 ; Uses the stack to block clear memory
