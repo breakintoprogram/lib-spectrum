@@ -2,13 +2,14 @@
 ; Title:        Vector Demo
 ; Author:       Dean Belfield
 ; Started:	30/06/2012
-; Last Updated:	05/07/2012
+; Last Updated:	11/04/2020
 ;
 ; Requires:	vector, output, keyboard, screen_buffer, sound, sprite, math
 ;
 ; Modinfo:
 ;
 ; 05/07/2012:	Pressing Space now toggles cursor between points; added circle draw
+; 11/04/2020:	Modified calls to maths routines and Clear_Screen_Fast
 ;
 
 			DEVICE ZXSPECTRUM48			; sjasmplus directive for SAVESNA at end
@@ -34,10 +35,10 @@ Main:			DI
 			CALL Clear_Screen
 			LD HL,Interrupt
 			LD IX,0xFFF0
-			LD (IX+04h),0xC3            ; Opcode for JP
+			LD (IX+04h),0xC3           		 ; Opcode for JP
 			LD (IX+05h),L
 			LD (IX+06h),H
-			LD (IX+0Fh),0x18            ; Opcode for JR; this will do JR to FFF4h
+			LD (IX+0Fh),0x18           		 ; Opcode for JR; this will do JR to FFF4h
 			LD A,0x39
 			LD I,A
 			LD SP,0xFFF0
@@ -73,13 +74,13 @@ Position:		DW 0x5070,0x6080,0x7060
 
 ; Handle user input
 ;
-User_Interface:		CALL Read_Keyboard		; Read the keyboard
-			PUSH AF				; Stack the keypress
-			JR Z,User_Interface_End		; No keys pressed; jump to end
+User_Interface:		CALL Read_Keyboard				; Read the keyboard
+			PUSH AF						; Stack the keypress
+			JR Z,User_Interface_End				; No keys pressed; jump to end
 
-			LD DE,(Position + 0)		; Get the cross position)
+			LD DE,(Position + 0)				; Get the cross position)
 			CP "Q"
-			JR NZ, $+3			; Saves lots of labels; skips 3 bytes (the JR and the DEC)
+			JR NZ, $+3					; Saves lots of labels; skips 3 bytes (the JR and the DEC)
 			DEC D
 			CP "A"
 			JR NZ, $+3
@@ -90,13 +91,13 @@ User_Interface:		CALL Read_Keyboard		; Read the keyboard
 			CP "P"
 			JR NZ, $+3
 			INC E
-			LD (Position + 0),DE		; Store the new cross position
+			LD (Position + 0),DE				; Store the new cross position
 
-			LD HL,Debounce_Key		; Check whether we've pressed this key before
+			LD HL,Debounce_Key				; Check whether we've pressed this key before
 			CP (HL)				
-			JR Z,User_Interface_End		; Yes we have, so skip the debounced keys
+			JR Z,User_Interface_End				; Yes we have, so skip the debounced keys
 
-			CP " "				; If space pressed, then rotate the cross positions
+			CP " "						; If space pressed, then rotate the cross positions
 			JR NZ,User_Interface_End
 			LD HL,(Position + 0)
 			LD DE,(Position + 2)
@@ -105,8 +106,8 @@ User_Interface:		CALL Read_Keyboard		; Read the keyboard
 			LD (Position + 4),DE
 			LD (Position + 0),BC
 
-User_Interface_End:	POP AF				; Unstack the keypress
-			LD (Debounce_Key),A		; Store for debounce 
+User_Interface_End:	POP AF						; Unstack the keypress
+			LD (Debounce_Key),A				; Store for debounce 
 			RET
 
 ;
@@ -132,6 +133,7 @@ Interrupt:		DI
 
 			LD A,2
 			OUT (254),A
+			LD HL,0x4000
 			CALL Clear_Screen_Fast
 			LD A,3
 			OUT (254),A
@@ -150,22 +152,22 @@ Interrupt:		DI
 			SUB H
 			JR NC,$+3
 			NEG
-			LD H,A
-			LD L,A
-			CALL MULTIPLY
-			PUSH HL
+			LD D,A
+			LD E,A
+			CALL MUL16
+			PUSH BC
 			LD A,(Position + 3)
 			LD H,A
 			LD A,(Position + 1)
 			SUB H
 			JR NC,$+3
 			NEG
-			LD H,A
-			LD L,A
-			CALL MULTIPLY
-			POP DE
-			ADD HL,DE
-			CALL SQRT
+			LD D,A
+			LD E,A
+			CALL MUL16
+			POP HL
+			ADD HL,BC
+			CALL SQR16
 			LD BC,(Position + 2)
 			CALL Draw_Circle
 			LD A,6
