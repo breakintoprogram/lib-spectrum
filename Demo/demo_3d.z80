@@ -2,12 +2,13 @@
 ; Title:        3D Demo
 ; Author:       Dean Belfield
 ; Started:	01/04/2020
-; Last Updated:	01/04/2020
+; Last Updated:	11/04/2020
 ;
 ; Requires:	macros, vector, vector_filled, output, keyboard, screen_buffer, sound, sprite, math
 ;
 ; Modinfo:
 ;
+; 11/04/2020:	Draws direct to screen if SCREEN_BUFFER is omitted
 
 			DEVICE ZXSPECTRUM48			; sjasmplus directive for SAVESNA at end
 
@@ -72,7 +73,11 @@ Main:			DI
 			EI
 	
 LOOP:			DI
+			IFDEF SCREEN_BUFFER
 			LD HL,SCREEN_BUFFER
+			ELSE
+			LD HL,0x4000
+			ENDIF
 			CALL Clear_Screen_Fast
 			LD HL,Vector_Texture_03
 			LD B,150
@@ -82,8 +87,10 @@ LOOP:			DI
 			LD IX,Cube
 			CALL Translate
 			CALL Draw_Shape
+			IFDEF SCREEN_BUFFER
 			LD HL,SCREEN_BUFFER
 			CALL Copy_Screen
+			ENDIF
 			EI
 
 			LD A,(THE): ADD A,3: LD (THE),A
