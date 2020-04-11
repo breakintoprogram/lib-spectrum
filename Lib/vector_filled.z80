@@ -2,7 +2,7 @@
 ; Title:	ZX Spectrum Vector Output Routines
 ; Author:	Dean Belfield
 ; Created:	01/04/2020
-; Last Updated:	10/04/2020
+; Last Updated:	11/04/2020
 ;
 ; Requires:	output, macro
 ;
@@ -13,6 +13,7 @@
 ;		Added Draw_Circle_Filled
 ; 08/04/2020:	Fixed bug in Draw_Circle_Filled to draw the bottom-most scan line
 ; 10/04/2020:	Checks for SCREEN_BUFFER definition and writes to that if defined
+; 11/04/2020:	Optimised Draw_Horz_Line_Texture and Draw_Vector_Table
 
 ; EQUS
 ;
@@ -84,11 +85,11 @@ Draw_Circle_Filled:	LD (Draw_Vector_Table_1+1), HL
 1:			LD L,A 				; Store in L
 			LD A,B				; Get the origin
 			ADD C				; Add the radius
-			SUB L 				; Subtract the top
 			CP 192 				; Check bottom screen boundary
-			JR C, 2F
-			LD A,191
-2:			INC A				; Because height = bottom - top + 1
+			JR C,2F				; If off bottom then
+			LD A,191			; Crop to 191
+2			SUB L 				; Subtract the top
+			INC A				; Because height = bottom - top + 1
 			LD B,A				; Store in B
 			JP Draw_Vector_Table		; Draw the table
 
@@ -133,28 +134,6 @@ Draw_Triangle_Filled:	LD (Draw_Vector_Table_1+1),HL	; Store the texture address 
 			SUB L				; Subtract from L (the min)
 			LD B,A				; Get the height
 			RET Z				; Don't draw if zero
-
-;
-; Draw the contents of the vector tables
-; L: Start Y position
-; B: Length
-;
-Draw_Vector_Table:	LD H,high Vector_Table_X1	; Get the LHS table in L - HL is now a pointer in that table
-1:			PUSH BC, HL			; Push the table pointer and loop value
-			LD C,(HL)			; Get X1 from the first table
-			INC H				; Increment H to the second table (they're a page apart)
-			LD E,(HL)			; Get X2 from the second table
-			LD B, L				; The Y coordinate is L
-			LD A,L				; Now calculate the index into the texture table
-			AND 7				; by getting the Y coordinate, ANDing with 7, and
-Draw_Vector_Table_1:	LD HL,0				; adding to the texture address, which has been self-modded into here
-			ADD_HL_A			; Add it as an offst into that table
-			LD A,(HL)			; And fetch the texture byte
-			CALL Draw_Horz_Line_Texture	; Draw the horizontal line
-			POP HL, BC			; Pop the table pointer and loop value
-			INC L				; Increment to next line in table
-			DJNZ 1B				; Loop until complete
-			RET 
 
 ; Draw a line into the vector table
 ; B = Y pixel position 1
@@ -325,85 +304,144 @@ Draw_Circle_Table:	AND A
 			INC IXL				; X=X+1
 			JR 0B
 
-; Draw Horizontal Line routine
-; B = Y coordinate
-; C = X pixel position 1
-; E = X pixel position 2
+; Draw the contents of the vector tables
+; L: Start Y position
+; B: Length
 ;
-Draw_Horz_Line_Solid:	LD A,0xFF			; Set texture to all 1's and drop through...
+Draw_Vector_Table:	LD C,L				; Store the Y position in C
+			IFDEF SCREEN_BUFFER		; If using a screen buffer...
+			LD DE,SCREEN_BUFFER		; Calculate initial positio in buffer
+			LD H,0				
+			DUP 5
+			ADD HL,HL 
+			EDUP
+			ADD HL,DE
+			ELSE				; If drawing direct to screen...
+			PUSH BC				; Get screen address
+			LD B,L 
+			LD C,0
+			CALL Get_Pixel_Address
+			POP BC
+			ENDIF
+1:			PUSH HL				; Save the screen buffer address
+			LD H,high Vector_Table_X1	; Get the MSB table in H - HL is now a pointer in that table
+			LD L,C				; Get the LSB in from C
+			LD D,(HL)			; Get X1 from the first table
+			INC H				; Increment H to the second table (they're a page apart)
+			LD E,(HL)			; Get X2 from the second table
+			LD A,C				; Now calculate the index into the texture table
+			AND 7				; by getting the Y coordinate, ANDing with 7, and
+Draw_Vector_Table_1:	LD HL,0				; adding to the texture address, which has been self-modded into here
+			ADD_HL_A			; Add it as an offst into that table
+			LD A,(HL)			; And fetch the texture byte
+			POP HL				; Pop screen position back off stack
+			PUSH HL				; And stick it back on again
+			PUSH BC
+			CALL Draw_Horz_Line_Texture
+			POP BC
+			POP HL
+			INC C
+			IFDEF SCREEN_BUFFER		; If using scren buffer...
+			LD DE,32			; Just add 32 bytes to get to next line
+			ADD HL,DE 
+			ELSE				; If writing direct to screen
+			CALL Pixel_Address_Down		; Go to next line in screen memory
+			ENDIF
+			DJNZ 1B
+			RET
 
 ; Draw Horizontal Line routine with texture
-; B = Y coordinate
-; C = X pixel position 1
+; HL = Screen address (first character row)
+; D = X pixel position 1
 ; E = X pixel position 2
 ; A = Texture byte
 ;
-Draw_Horz_Line_Texture:	LD IXL,A			; Store the texture byte
-			LD A,E				; Make sure we're always drawing left to right
-			CP C
-			JR NC,Draw_Horz_Line_1
-			LD E,C				; Swap X coordinates round if not
-			LD C,A
-Draw_Horz_Line_1:	IFDEF SCREEN_BUFFER
-			CALL Get_Pixel_Address_B	; Get the screen address of the left point
-			ELSE
-			CALL Get_Pixel_Address
-			ENDIF
-			EX AF,AF'			; Store in DE,A'
-			EX DE,HL			; So E (X pixel position 2) will now be in L
-			LD C,L
-			IFDEF SCREEN_BUFFER
-			CALL Get_Pixel_Address_B
-			ELSE
-			CALL Get_Pixel_Address		; Get the screen address of the right point
-			ENDIF
-;
-; At this point, we have:
-; DE = Screen address of point 1
-; A' = Pixel position of point 1 (0-7)
-; HL = Screen address of point 2
-; A  = Pixel position of point 2 (0-7)
-;
-			LD BC,Plot_Line_RHS		; Point BC to the table for the RHS pixel data
+Draw_Horz_Line_Solid:	LD A,255
+Draw_Horz_Line_Texture:	PUSH HL				; Push screen address
+			EX AF,AF			; Shove texture in AF' for the moment
+			LD A,E				; Check if D > E
+			CP D 
+			JR NC,0F
+			LD E,D				; Swap D and E
+			LD D,A
+0:			LD BC,Plot_Line_LHS		; Get pixel data table
+			LD A,D				; Calculate index into table for X1
+			AND 7
 			ADD A,C
-			LD C,A
-			LD A,L				; We have a special case if both points in same character
-			CP E
-			JR NZ,Draw_Horz_Line_2		; Special case if both points in same character square
-			EX AF,AF'
-			LD HL,Plot_Line_LHS		; Get the LHS pixel data
+			LD C,A 					
+			LD A,D 				; Calculate X1 byte position
+			SRL A
+			SRL A
+			SRL A 
+			AND 31
 			ADD A,L
-			LD L,A
-			LD A,(BC)			; XOR the RHS and LHS pixel data
-			XOR (HL)
-			CPL				; CPL it (so all 1's become 0's and 0's become 1's)
-			AND IXL				; Mask with the texture byte
-			EX DE, HL			; This is now the data we are going to draw
-			OR (HL)
-			LD (HL),A
-			RET				; Nothing more to do at this point, so return
-Draw_Horz_Line_2:	LD A,(BC)			; Plot the RHS end
-			AND IXL
-			OR (HL)
-			LD (HL),A
-			DEC L				; Go left one character
-			LD A,L				; Skip next bit if no between fill to do
-			CP E
-			JR Z,Draw_Horz_Line_End	
-Draw_Horz_Line_M1:	LD D,IXL			; Stick the texture byte in D for speed
-Draw_Horz_Line_Loop:	LD (HL),D			; Draw a filler byte
-			DEC L				; Go left one character
-			LD A,E				; Loop until we reach the left hand point character square
-			CP L
-			JR NZ,Draw_Horz_Line_Loop
-Draw_Horz_Line_End:	EX AF,AF'			; Plot the LHS end
-			LD BC,Plot_Line_LHS
-			ADD A,C
-			LD C,A
+			LD D,A				; D = X1 (byte)
 			LD A,(BC)
-			AND IXL
+			LD IXH,A			; IXH = X1 (data)
+			LD BC,Plot_Line_RHS		; Get pixel data table
+			LD A,E				; Calculate index into table for X1
+			AND 7
+			ADD A,C
+			LD C,A 					
+			LD A,E 				; Calculate X1 byte position
+			SRL A
+			SRL A
+			SRL A 
+			AND 31
+			ADD A,L
+			LD E,A				; E = X2 (byte) and D = X1 (byte)
+			LD A,(BC)			
+			LD IXL,A			; IXL = X2 (data)
+			EX AF,AF			; Get the texture back
+			LD C,A				; Stick it in C
+; Here:
+; H = High byte of screen buffer address
+; E = X2 (low byte of screen buffer address), IXL = data
+; D = X1 (low byte of screen buffer address), IXH = data
+; C = Texture
+;		
+			LD A,E 				; Calculate line length in bytes	
+			SUB D 
+			LD B,A	
+			JR NZ, 1F			; If not zero, then skip to draw line
+			LD L,D 				; Special case when both endpoints in same byte
+			LD A,IXH 			
+			XOR IXL
+			CPL
+			AND C 
 			OR (HL)
 			LD (HL),A
+			POP HL
+			RET
+
+1:			LD L,D				; Draw the LHS byte
+			LD A,IXH 
+			AND C
+			OR (HL)
+			LD (HL),A 
+			INC L 
+;
+; Draw the bulk of the line. This is an unrolled loop and works by skipping into the relevant
+; bit of the unrolled routine
+;
+			LD A,31				; Calculate how far to skip 
+			SUB B
+			JR C,3F				; If negative, then skip
+			SLA A
+			LD (Draw_Horz_Line_Fast_M1+1),A	; Self-mod the JR instruction
+Draw_Horz_Line_Fast_M1:	JR $+2				; Jump into relevant bit of DUP'd code
+			DUP 30
+			LD (HL),C 
+			INC L 
+			EDUP
+
+3:			LD L,E 				; Finally do the RHS byte
+			LD A,IXL
+			AND C
+			OR (HL)
+			LD (HL),A
+
+			POP HL 
 			RET
 
 ; End-points for the horizontal lines
