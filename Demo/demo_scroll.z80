@@ -2,13 +2,14 @@
 ; Title:        Scroll Demo
 ; Author:       Dean Belfield
 ; Created:	27/01/2020
-; Last updated: 03/02/2020
+; Last updated: 11/04/2020
 ;
 ; Requires:	keyboard, sprite_masked, scroll
 ;
 ; Modinfo:
 ;
 ; 03/02/2020:	Tileset information now stored in map data
+; 11/04/2020:	Changed call to RND16
 ;
 			DEVICE ZXSPECTRUM48			; sjasmplus directive for SAVESNA at end
 
@@ -128,7 +129,7 @@ Move_Scroll_1:		LD (Vertical_Scroll_Offset), HL
 Initialise_Sprites:	LD IX,Sprite_Data			; Where the sprite data is stored
 			LD B,12					; Number of sprites to initialise
 			LD C,0					; Sprite Y coordinate
-Initialise_Sprites_1:	CALL Rand16				; Get a random X coordinate
+Initialise_Sprites_1:	CALL RND16				; Get a random X coordinate
 			RES 7, L
 			LD (IX+Sprite_X), L			; And store in Sprite_X
 			LD (IX+Sprite_Y), C			; Store the Y coordinate
