@@ -364,4 +364,4 @@ Sprite_Bubble_6:	DB %11111111, %00000000, %11111111, %00000000, %11111111, %0000
 
 Code_Length:		EQU $-Code_Start+1
 
-			SAVESNA "Demo/demo_scroll.sna", Code_Start
+			SAVESNA "demo/demo_scroll.sna", Code_Start

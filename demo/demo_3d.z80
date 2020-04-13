@@ -435,5 +435,5 @@ Cube:			DB 8
 
 Code_Length:		EQU $-Code_Start+1
 
-			SAVESNA "Demo/demo_3d.sna", Code_Start
+			SAVESNA "demo/demo_3d.sna", Code_Start
 
