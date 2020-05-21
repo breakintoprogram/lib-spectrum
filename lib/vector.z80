@@ -2,9 +2,9 @@
 ; Title:	ZX Spectrum Vector Output Routines
 ; Author:	Dean Belfield
 ; Created:	30/06/2012
-; Last Updated:	01/04/2020
+; Last Updated:	21/05/2020
 ;
-; Requires:	output.asm
+; Requires:	output
 ;
 ; Modinfo:
 ;
@@ -13,6 +13,7 @@
 ; 04/07/2012:	Added Draw_Horz_Line_Solid & Draw_Horz_Line_Texture; special fast case used for drawing polygons
 ; 05/07/2012:	Added Draw_Circle routine; needs some optimisation, more a proof of concept at the moment
 ; 01/04/2020:	Moved Draw_Horz_Line_Solid & Draw_Horz_Line_Texture to vector_filled.z80
+; 21/05/2020:	Fixed bug in Draw_Line where final pixel not plotted
 ;
 
 ;
@@ -96,7 +97,7 @@ Draw_Circle:		AND A				; Zero radius
 			AND A
 			SBC HL,DE			; HL = 1 - CR
 ;
-; SET DE (D2) = 1
+; SET DE (D1) = 1
 ;
 			LD DE,1
 
@@ -283,11 +284,7 @@ Draw_Line_X2:		LD (Draw_Line_Q1_M2 + 1),A	; A contains the code for RLC D or RRC
 			LD D,(IX+0)			; Get the pixel data from the Point_Plot table
 			LD A,B				; Check if B and C are 0
 			OR C
-			JR NZ,Draw_Line_Q		; There is a line to draw, so skip to the next bit
-			LD A,(HL)			; Here we've got a single point line, so plot and return
-			OR D
-			LD (HL),A
-			RET
+			JR Z,Draw_Line_P		; There is no line, so just plot a single point
 ;
 ; At this point
 ; HL = Screen address of the start point
@@ -321,6 +318,9 @@ Draw_Line_Q1_M2:	RRC D				; Rotate the pixel right or left; more self-modifying 
 			JR NC,Draw_Line_Q1_S
 Draw_Line_Q1_M3:	INC L				; If we get a carry then move to adjacent screen address; more self modifying code
 Draw_Line_Q1_S:		DJNZ Draw_Line_Q1_L		; Loop until the line is drawn
+Draw_Line_P:		LD A,(HL)			; Plot the final point
+			OR D
+			LD (HL),A
 			RET
 ;
 ; This bit draws the line where B>=C (more vertical than horizontal, or diagonal)
@@ -341,7 +341,7 @@ Draw_Line_Q2_M3:	INC L				; If we get a carry then move to adjacent screen addre
 Draw_Line_Q2_S:		LD E,A				; Store the error value back in
 			CALL Pixel_Address_Down		; And also move down
 			DJNZ Draw_Line_Q2_L
-			RET
+			JR Draw_Line_P			; Plot the final point
 
 ; Erase Line routine
 ; B = Y pixel position 1
