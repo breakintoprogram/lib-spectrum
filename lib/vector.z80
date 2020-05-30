@@ -2,7 +2,7 @@
 ; Title:	ZX Spectrum Vector Output Routines
 ; Author:	Dean Belfield
 ; Created:	30/06/2012
-; Last Updated:	21/05/2020
+; Last Updated:	30/05/2020
 ;
 ; Requires:	output
 ;
@@ -14,6 +14,7 @@
 ; 05/07/2012:	Added Draw_Circle routine; needs some optimisation, more a proof of concept at the moment
 ; 01/04/2020:	Moved Draw_Horz_Line_Solid & Draw_Horz_Line_Texture to vector_filled.z80
 ; 21/05/2020:	Fixed bug in Draw_Line where final pixel not plotted
+; 30/05/2020:	Fixed bug in implementation of Bresenham for Draw_Line and Erase_Line
 ;
 
 ;
@@ -288,8 +289,8 @@ Draw_Line_X2:		LD (Draw_Line_Q1_M2 + 1),A	; A contains the code for RLC D or RRC
 ;
 ; At this point
 ; HL = Screen address of the start point
-;  B = Line height
-;  C = Line width
+;  B = Line height (YL)
+;  C = Line width (XL)
 ;  D = Pixel data
 ;
 Draw_Line_Q:		LD A,B				; Work out which diagonal we are on
@@ -298,20 +299,20 @@ Draw_Line_Q:		LD A,B				; Work out which diagonal we are on
 ;
 ; This bit of code draws the line where B<C (more horizontal than vertical)
 ;
-Draw_Line_Q1:		LD A,C
-			LD (Draw_Line_Q1_M1 + 1),A	; Self-mod the code again to store the line width
-			LD C,B
-			LD B,A
-			LD E,C				; Calculate the error value
-			SRL E
+Draw_Line_Q1:		LD A,C				; A = XL
+			LD (Draw_Line_Q1_M1 + 1),A	; Self-mod the code to store XL in loop
+			LD C,B				; C = YL
+			LD B,A				; B = XL (loop counter)
+			LD E,B				; E = XL
+			SRL E				; E = XL / 2 (error)
 Draw_Line_Q1_L:		LD A,(HL)			; Plot the pixel
 			OR D
 			LD (HL),A
-			LD A,E
+			LD A,E				; Add the line height to the error (E = E - YL)
 			SUB C
 			LD E,A
 			JR NC,Draw_Line_Q1_M2
-Draw_Line_Q1_M1:	ADD A,0				; Add the line height (previously stored; self modifying code)
+Draw_Line_Q1_M1:	ADD A,0				; Add the line width to the error (E = E + XL) - previously self-modded
 			LD E,A
 			CALL Pixel_Address_Down
 Draw_Line_Q1_M2:	RRC D				; Rotate the pixel right or left; more self-modifying code
@@ -325,16 +326,16 @@ Draw_Line_P:		LD A,(HL)			; Plot the final point
 ;
 ; This bit draws the line where B>=C (more vertical than horizontal, or diagonal)
 ;
-Draw_Line_Q2:		LD (Draw_Line_Q2_M1 + 1),A
-			LD E,C				; Calculate the error value
-			SRL E
+Draw_Line_Q2:		LD (Draw_Line_Q2_M1 + 1),A	; Self-mod the code to store YL in loop
+			LD E,B				; E = YL
+			SRL E				; E = YL / 2 (error)
 Draw_Line_Q2_L:		LD A,(HL)			; Plot the pixel
 			OR D
 			LD (HL),A
-			LD A,E				; Get the error value
-			SUB C				; Add the line length to it (X2-X1)
+			LD A,E				; Add the line width to the error
+			SUB C				; 
 			JR NC,Draw_Line_Q2_S		; Skip the next bit if we don't get a carry
-Draw_Line_Q2_M1: 	ADD A,0				; Add the line height (previously stored; self modifying code)
+Draw_Line_Q2_M1: 	ADD A,0				; Add the line height to the error (E = E + XL) - previously self-modded
 Draw_Line_Q2_M2:	RRC D				; Rotates the pixel right with carry
 			JR NC,Draw_Line_Q2_S
 Draw_Line_Q2_M3:	INC L				; If we get a carry then move to adjacent screen address; more self modifying code
@@ -425,7 +426,7 @@ Erase_Line_Q1:		LD A,C
 			LD (Erase_Line_Q1_M1 + 1),A	; Self-mod the code again to store the line width
 			LD C,B
 			LD B,A
-			LD E,C				; Calculate the error value
+			LD E,B				; Calculate the error value
 			SRL E
 Erase_Line_Q1_L:	LD A,(HL)			; Unplot the pixel
 			AND D
@@ -441,12 +442,15 @@ Erase_Line_Q1_M2:	RRC D				; Rotate the pixel right or left; more self-modifying
 			JR C,Erase_Line_Q1_S		; Note the change here from the Draw_Line routine
 Erase_Line_Q1_M3:	INC L				; If we get no carry then move to adjacent screen address; more self modifying code
 Erase_Line_Q1_S:	DJNZ Erase_Line_Q1_L		; Loop until the line is drawn
+Erase_Line_P:		LD A,(HL)			; Plot the final pixel
+			AND D
+			LD (HL),A
 			RET
 ;
 ; This bit draws the line where B>=C (more vertical than horizontal, or diagonal)
 ;
 Erase_Line_Q2:		LD (Erase_Line_Q2_M1 + 1),A
-			LD E,C				; Calculate the error value
+			LD E,B				; Calculate the error value
 			SRL E
 Erase_Line_Q2_L:	LD A,(HL)			; Unplot the pixel
 			AND D
@@ -461,7 +465,7 @@ Erase_Line_Q2_M3:	INC L				; If we get no carry then move to adjacent screen add
 Erase_Line_Q2_S:	LD E,A				; Store the error value back in
 			CALL Pixel_Address_Down		; And also move down
 			DJNZ Erase_Line_Q2_L
-			RET
+			JR Erase_Line_P			; Plot the final pixel
 
 ; Note that the functions above only work if each of these tables are in a byte boundary
 ;
