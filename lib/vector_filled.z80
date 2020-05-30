@@ -2,7 +2,7 @@
 ; Title:	ZX Spectrum Vector Output Routines
 ; Author:	Dean Belfield
 ; Created:	01/04/2020
-; Last Updated:	13/04/2020
+; Last Updated:	20/05/2020
 ;
 ; Requires:	output, macro
 ;
@@ -16,6 +16,7 @@
 ; 11/04/2020:	Optimised Draw_Horz_Line_Texture and Draw_Vector_Table
 ; 13/04/2020:	Fixed bug in Draw_Horz_Line_Texture; now masks pixel data on LHS and RHS
 ;		Fixed bug in Draw_Horz_Line_Texture; Plot_Line_LHS and Plot_Line_RHS can now fall over a page boundary
+; 20/05/2020:	ixed bug in implementation of Bresenham for Draw_Line_Table
 
 ; EQUS
 ;
@@ -203,7 +204,7 @@ Draw_Line_Table_Q1:	LD A,C
 			LD (Draw_Line_Table_Q1_M1+1), A	; Self-mod the code to store the line width
 			LD C,B
 			LD B,A
-			LD E,C				; Calculate the error value
+			LD E,B				; Calculate the error value
 			SRL E
 1:			LD A,E
 			SUB C
@@ -221,7 +222,7 @@ Draw_Line_Table_Q1_M2:	INC D				; Increment or decrement the X coordinate (self-
 ; This bit draws the line where B>=C (more vertical than horizontal, or diagonal)
 ;
 Draw_Line_Table_Q2:	LD (Draw_Line_Table_Q2_M1+1), A	; Self-mod the code to store the line width
-			LD E,C				; Calculate the error value
+			LD E,B				; Calculate the error value
 			SRL E
 1:			LD (HL),D			; Store the X position
 			LD A,E				; Get the error value
