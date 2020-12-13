@@ -1,8 +1,8 @@
 ;
-; Title:        Colour bars demo
+; Title:        Area 51
 ; Author:       Dean Belfield
-; Started:	13/12/2020
-; Last Updated:	13/12/2020
+; Started:	20/12/2020
+; Last Updated:	20/12/2020
 ;
 ; Requires:	output, keyboard
 ;
@@ -58,6 +58,9 @@ Interrupt:		DI
 			PUSH HL
 			PUSH IY
 
+			LD DE,(Colour_Table_Address)	; DE = Colour table address
+			LD BC,0x226F			; BC = Timing loop values
+			LD A,192			;  A = Number of rows
 			CALL Colourbars_Effect
 			LD HL,Colour_Table_Address	; Increment the low byte of the colour table
 			INC (HL)			; address to scroll it
@@ -77,10 +80,14 @@ Interrupt:		DI
 			EI
 			RET
 
+; Colourbars Routine
+; DE: Address of colour table (on page boundary)
+;  C: Timing loop (course adjustmnt)
+;  B: Timing loop (fine adjustment)
+;  A: Number of rows to display (multiple of 8)
+;
 Colourbars_Effect:	LD (Colourbars_Effect_SP+1),SP	; Preserve the stack pointer   	
 		
-			LD B,192			; B = Number of rows to display; multiple of 8
-			LD DE,(Colour_Table_Address)	; DE = Colour table address
   			EXX				
   			EX AF,AF'		
   			LD HL,0x5800-5			; HL' = Attribute Address
@@ -89,18 +96,16 @@ Colourbars_Effect:	LD (Colourbars_Effect_SP+1),SP	; Preserve the stack pointer
 			EX AF,AF'
   			EXX
 ;
-; This bit waits for the raster to get past the border
+; This bit is a timing loop to wait for the raster to get past the border
 ;
-			LD A,B				; Temporarily store the loop counter in A
-			LD BC,0x216F			; The loop; adjust high byte (B) for fine tuning
 1:			DJNZ 1B
 			LD B,0x08
   			DEC C		
   			JR NZ,1B
-			LD B,A 				; Restore the loop counter
-;
+;			
 ; Start the effect
 ; 
+			LD B,A 				; Store loop counter in B
 2:			LD A,(DE)			; Fetch the colour from DE
   			INC E				; Increment to next address in colour table
   			EXX				
