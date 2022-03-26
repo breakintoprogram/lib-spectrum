@@ -13,7 +13,7 @@
 				"hostname": "localhost",
 				"port": 10000
 			},
-			"topOfStack": "Stack_Top",
+			
 			"rootFolder": "${fileDirname}",
 			"listFiles": [
 				{
