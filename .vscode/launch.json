@@ -15,13 +15,9 @@
 			},
 			"topOfStack": "Stack_Top",
 			"rootFolder": "${fileDirname}",
-			"listFiles": [
+			"sjasmplus": [
 				{
-					"path": "${fileDirname}/${fileBasenameNoExtension}.lst",
-					"asm": "sjasmplus",
-					"useFiles": true,
-					"mainFile": "${fileDirname}/${fileBasenameNoExtension}.z80",
-					"srcDirs": [ "lib" ]
+					"path": "${fileDirname}/${fileBasenameNoExtension}.sld",
 				}
 			],
 			"disassemblerArgs": {
