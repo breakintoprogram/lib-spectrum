@@ -141,5 +141,5 @@ Colour_Table:		DUP 8
 
 Code_Length:		EQU $-Code_Start+1
 
-			SAVESNA "Z80/Demo/demo_colourbars.sna", Code_Start
+			SAVESNA "demo/demo_colourbars.sna", Code_Start
 

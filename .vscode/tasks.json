@@ -6,10 +6,11 @@
  		{
             "label": "sjasmplus",
             "type": "shell",
-            "command": "sjasmplus",    						
+            "command": "sjasmplus",
             "args": [
-				"--lst=${fileDirname}/${fileBasenameNoExtension}.lst",
-            	"${file}"                                   
+				"--sld=${fileDirname}/${fileBasenameNoExtension}.sld",
+                "--fullpath",
+            	"${file}"
 			],
             "group": {
                 "kind": "build",
